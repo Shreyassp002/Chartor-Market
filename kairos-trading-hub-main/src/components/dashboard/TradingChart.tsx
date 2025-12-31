@@ -8,18 +8,17 @@ export const TradingChart = ({ data }) => {
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        // 1. Configure the Chart Look (Dark Mode)
         const chart = createChart(chartContainerRef.current, {
             layout: {
-                background: { type: ColorType.Solid, color: '#09090b' }, // Match your UI background
-                textColor: '#d4d4d8', // Zinc-300
+                background: { type: ColorType.Solid, color: '#111111' },
+                textColor: '#d4d4d8', 
             },
             grid: {
-                vertLines: { color: '#1f1f22' }, // Subtle grid
+                vertLines: { color: '#1f1f22' }, 
                 horzLines: { color: '#1f1f22' },
             },
             width: chartContainerRef.current.clientWidth,
-            height: 500,
+            height: chartContainerRef.current.clientHeight || 500,
             timeScale: {
                 timeVisible: true,
                 secondsVisible: false,
@@ -30,42 +29,75 @@ export const TradingChart = ({ data }) => {
             },
         });
 
-        // 2. Add Candlestick Series (Green/Red)
-        // lightweight-charts v5+ uses addSeries() instead of addCandlestickSeries().
         const candlestickSeries = chart.addSeries(CandlestickSeries, {
-            upColor: '#10b981',        // Emerald Green (Win)
-            downColor: '#ef4444',      // Red (Loss)
+            upColor: '#10b981',
+            downColor: '#ef4444',
             borderVisible: false,
             wickUpColor: '#10b981',
             wickDownColor: '#ef4444',
         });
 
-        // 3. Inject Data
         if (data && data.length > 0) {
-            candlestickSeries.setData(
-                data.map((c) => ({
-                    ...c,
-                    time: c.time as UTCTimestamp,
-                }))
-            );
+            const formattedData = data.map((c) => ({
+                ...c,
+                time: c.time as UTCTimestamp,
+            }));
+
+            candlestickSeries.setData(formattedData);
+
+            const totalCandles = formattedData.length;
+            const visibleCandles = 150;
+
+            if (totalCandles > visibleCandles) {
+                const startIndex = totalCandles - visibleCandles;
+                const startTime = formattedData[startIndex].time as UTCTimestamp;
+                const endTime = formattedData[totalCandles - 1].time as UTCTimestamp;
+
+                chart.timeScale().setVisibleRange({
+                    from: startTime,
+                    to: endTime,
+                });
+            } else {
+                chart.timeScale().fitContent();
+            }
+        } else {
+            chart.timeScale().fitContent();
         }
 
-        chart.timeScale().fitContent();
         chartRef.current = chart;
 
-        // Resize Handler
         const handleResize = () => {
-            chart.applyOptions({ width: chartContainerRef.current?.clientWidth });
+            if (chartContainerRef.current) {
+                chart.applyOptions({
+                    width: chartContainerRef.current.clientWidth,
+                    height: chartContainerRef.current.clientHeight || 500
+                });
+            }
         };
         window.addEventListener('resize', handleResize);
 
+        const resizeObserver = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const { width, height } = entry.contentRect;
+                chart.applyOptions({ width, height: height || 500 });
+            }
+        });
+
+        const containerElement = chartContainerRef.current;
+        if (containerElement) {
+            resizeObserver.observe(containerElement);
+        }
+
         return () => {
             window.removeEventListener('resize', handleResize);
+            if (containerElement) {
+                resizeObserver.unobserve(containerElement);
+            }
             chart.remove();
         };
     }, [data]);
 
     return (
-        <div ref={chartContainerRef} className="w-full h-[500px]" />
+        <div ref={chartContainerRef} className="w-full h-full" />
     );
 };

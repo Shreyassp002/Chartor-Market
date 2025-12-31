@@ -12,6 +12,7 @@ interface Strategy {
   description: string | null;
   logic: string;
   action: string;
+  risk_level: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -31,7 +32,7 @@ export function StrategiesTab() {
 
   useEffect(() => {
     fetchStrategies();
-    const interval = setInterval(fetchStrategies, 10000); 
+    const interval = setInterval(fetchStrategies, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -39,7 +40,7 @@ export function StrategiesTab() {
     try {
       const response = await fetch("/api/strategies");
       const data = await response.json();
-      
+
       if (data.status === "success" && data.strategies) {
         setStrategies(data.strategies);
       }
@@ -58,11 +59,11 @@ export function StrategiesTab() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: !currentStatus })
       });
-      
+
       const result = await response.json();
       if (result.status === "success") {
-        setStrategies(prev => prev.map(s => 
-          s.id === strategyId 
+        setStrategies(prev => prev.map(s =>
+          s.id === strategyId
             ? { ...s, is_active: !currentStatus }
             : s
         ));
@@ -279,8 +280,8 @@ export function StrategiesTab() {
                 key={strategy.id}
                 className={cn(
                   "rounded-lg p-4 border transition-all",
-                  strategy.is_active 
-                    ? "bg-card border-primary/20 shadow-sm" 
+                  strategy.is_active
+                    ? "bg-card border-primary/20 shadow-sm"
                     : "bg-muted/30 border-border/50"
                 )}
               >
@@ -302,6 +303,16 @@ export function StrategiesTab() {
                       )}>
                         {strategy.action}
                       </span>
+                      {strategy.risk_level && (
+                        <span className={cn(
+                          "text-xs px-2 py-0.5 rounded-full font-medium",
+                          strategy.risk_level === "SAFE"
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                            : "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+                        )}>
+                          {strategy.risk_level}
+                        </span>
+                      )}
                     </div>
                     {strategy.description && (
                       <p className="text-xs text-muted-foreground mb-2">
@@ -323,7 +334,7 @@ export function StrategiesTab() {
                     />
                   </div>
                 </div>
-                
+
                 {strategy.is_active && (
                   <div className="mt-3 pt-3 border-t border-border/50">
                     <div className="flex items-center gap-1.5 text-xs text-success">

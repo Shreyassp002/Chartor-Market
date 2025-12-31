@@ -12,54 +12,66 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class WeexClient:
-    def __init__(self):
-        self.api_key = os.getenv("WEEX_API_KEY")
-        self.secret_key = os.getenv("WEEX_SECRET")
-        self.passphrase = os.getenv("WEEX_PASSPHRASE")
+    def __init__(self, api_key=None, secret_key=None, passphrase=None):
+        # Support both constructor args and env vars
+        self.api_key = api_key or os.getenv("WEEX_API_KEY")
+        self.secret_key = secret_key or os.getenv("WEEX_SECRET")
+        self.passphrase = passphrase or os.getenv("WEEX_PASSPHRASE")
         
         self.base_url = "https://api-contract.weex.com"
 
     def _generate_signature(self, method, path, query_string="", body=""):
         timestamp = str(int(time.time() * 1000))
-        message = timestamp + method.upper() + path + query_string + body
+        
+        # Build pre-hash string according to WEEX API spec
+        if method == "GET":
+            if query_string:
+                pre_hash = f"{timestamp}{method.upper()}{path}?{query_string}"
+            else:
+                pre_hash = f"{timestamp}{method.upper()}{path}"
+        else:
+            pre_hash = f"{timestamp}{method.upper()}{path}{body}"
         
         signature = hmac.new(
             self.secret_key.encode('utf-8'),
-            message.encode('utf-8'),
+            pre_hash.encode('utf-8'),
             hashlib.sha256
         ).digest()
         
-        return base64.b64encode(signature).decode('utf-8'), timestamp
+        signature_b64 = base64.b64encode(signature).decode('utf-8')
+        return signature_b64, timestamp
 
     def _send_weex_request(self, method, endpoint, params=None):
         """Sends authenticated requests to WEEX (for ordering)"""
+        if params is None:
+            params = {}
+            
         path = endpoint
         query_string = ""
         body_str = ""
 
         if method == "GET" and params:
-            query_string = "?" + urllib.parse.urlencode(params)
+            query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
         elif method == "POST" and params:
             body_str = json.dumps(params)
 
         signature, timestamp = self._generate_signature(method, path, query_string, body_str)
         
         headers = {
-            "ACCESS-KEY": self.api_key,
-            "ACCESS-SIGN": signature,
-            "ACCESS-PASSPHRASE": self.passphrase,
-            "ACCESS-TIMESTAMP": timestamp,
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "X-WEEX-API-KEY": self.api_key,
+            "X-WEEX-PASSPHRASE": self.passphrase,
+            "X-WEEX-TIMESTAMP": timestamp,
+            "X-WEEX-SIGNATURE": signature
         }
         
-        url = f"{self.base_url}{path}{query_string}"
+        url = f"{self.base_url}{path}"
         
         try:
             if method == "GET":
-                res = requests.get(url, headers=headers, timeout=5)
+                res = requests.get(url, headers=headers, params=params if params else None, timeout=5)
             else:
-                res = requests.post(url, headers=headers, data=body_str, timeout=5)
+                res = requests.post(url, headers=headers, json=params if params else {}, timeout=5)
             
             if res.status_code != 200:
                 print(f"WEEX API Error {res.status_code}: {res.text[:200] if res.text else 'No response body'}")
@@ -117,31 +129,33 @@ class WeexClient:
     def place_order(self, side="buy", size="10", symbol="cmt_dogeusdt"):
         """
         Executes Trade on WEEX (Authenticated)
+        Uses the new Contract API format
         """
-        endpoint = "/capi/v2/order/placeOrder"
-        type_code = "1" if side.lower() == "buy" else "2"
+        endpoint = "/api/contract/Transaction_API/PlaceOrder"
         
-        payload = {
+        params = {
             "symbol": symbol,
-            "side": side.lower(),
-            "orderType": "market",
-            "size": str(size),
-            "type": type_code, 
-            "match_price": "1"
+            "side": 1 if side.lower() == "buy" else 2,  # 1=Buy, 2=Sell
+            "type": 2,          # 2 = Market Order
+            "quantity": str(size),   # Amount in Contracts
+            "leverage": 10      # Safety leverage
         }
         
-        print(f"📤 Sending Order to WEEX: {payload}")
+        print(f"Sending Order to WEEX: {params}")
         
-        res = self._send_weex_request("POST", endpoint, payload)
+        res = self._send_weex_request("POST", endpoint, params)
         
-        print(f"📥 WEEX Response: {res}")
+        print(f"WEEX Response: {res}")
         
-        if res and "code" in res:
-            if res["code"] == "00000":
-                print(f"WEEX ORDER SUCCESS: {res}")
-                return res
+        if res:
+            if isinstance(res, dict):
+                if res.get("code") == "00000" or res.get("status") == "success":
+                    print(f"WEEX ORDER SUCCESS: {res}")
+                    return res
+                else:
+                    print(f"WEEX API Error: {res.get('msg', res.get('message', 'Unknown error'))}")
+                    return res
             else:
-                print(f"WEEX API Error: {res.get('msg', 'Unknown error')}")
                 return res
         else:
             print(f"No response from WEEX API")
@@ -173,6 +187,25 @@ class WeexClient:
         print(f"📥 WEEX Close Position Response: {res}")
         return res
     
+    def get_balance(self):
+        """
+        Fetches Hackathon Test Funds (Futures Wallet)
+        """
+        endpoint = "/api/contract/Account_API/GetAccountBalance"
+        return self._send_weex_request("GET", endpoint)
+    
+    def set_leverage(self, symbol="cmt_btcusdt", leverage=10):
+        """
+        REQUIRED: Sets leverage before you can trade
+        """
+        params = {
+            "symbol": symbol,
+            "leverage": leverage,
+            "side": 1  
+        }
+        endpoint = "/api/contract/Account_API/AdjustLeverage"
+        return self._send_weex_request("POST", endpoint, params)
+    
     def get_positions(self):
         """Fetches all open positions from WEEX."""
         endpoint = "/capi/v2/position/list"
@@ -188,7 +221,7 @@ class WeexClient:
             if positions and positions.get("code") == "00000" and positions.get("data"):
                 for pos in positions.get("data", []):
                     symbol = pos.get("symbol")
-                    side = pos.get("side")  # 'long' or 'short'
+                    side = pos.get("side")  
                     size = pos.get("size")
                     
                     if symbol and side and size:

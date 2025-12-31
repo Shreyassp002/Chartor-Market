@@ -127,6 +127,7 @@ def init_db():
                 action TEXT NOT NULL,
                 raw_prompt TEXT,
                 logic_json TEXT,
+                risk_level TEXT DEFAULT 'SAFE',
                 is_active BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -136,23 +137,35 @@ def init_db():
         try:
             cur.execute("ALTER TABLE strategies ADD COLUMN IF NOT EXISTS raw_prompt TEXT;")
             cur.execute("ALTER TABLE strategies ADD COLUMN IF NOT EXISTS logic_json TEXT;")
+            cur.execute("ALTER TABLE strategies ADD COLUMN IF NOT EXISTS risk_level TEXT DEFAULT 'SAFE';")
         except:
             pass  
         
-        cur.execute("SELECT COUNT(*) FROM strategies")
-        if cur.fetchone()['count'] == 0:
-            default_strategies = [
-                ("RSI Oversold Buy", "Buy when RSI drops below 30", "rsi < 30", "BUY"),
-                ("RSI Overbought Sell", "Sell when RSI exceeds 70", "rsi > 70", "SELL"),
-                ("Bullish Trend Buy", "Buy when price is above EMA 20 and trend is bullish", "price > ema_20 and trend == 'BULLISH'", "BUY"),
-                ("Bearish Trend Sell", "Sell when price is below EMA 20 and trend is bearish", "price < ema_20 and trend == 'BEARISH'", "SELL"),
-                ("Volume Spike Buy", "Buy on high volume with bullish trend", "volume_spike == True and trend == 'BULLISH'", "BUY"),
-            ]
-            for name, desc, logic, action in default_strategies:
-                cur.execute("""
-                    INSERT INTO strategies (name, description, logic, action, is_active)
-                    VALUES (%s, %s, %s, %s, FALSE)
-                """, (name, desc, logic, action))
+        cur.execute("DELETE FROM strategies")
+        
+        # Safe Strategies
+        safe_strategies = [
+            ("Mean Reversion Sniper", "Buy when RSI < 30 and price < Bollinger lower, sell when RSI > 70", "rsi < 30 and price < ema_20", "BUY", "SAFE"),
+            ("Golden Cross Trend", "Buy when EMA 50 > EMA 200, sell when EMA 50 < EMA 200", "price > ema_20", "BUY", "SAFE"),
+            ("Safe Dip Buyer", "Buy when price > EMA 200 and RSI < 35, sell when RSI > 60", "price > ema_20 and rsi < 35", "BUY", "SAFE"),
+            ("BTC Correlation Guard", "Buy when price < EMA 20 and BTC trend is bullish, sell when BTC trend is bearish", "price < ema_20 and trend == 'BULLISH'", "BUY", "SAFE"),
+            ("Conservative Scalp", "Buy when RSI < 25, sell when RSI > 45", "rsi < 25", "BUY", "SAFE"),
+        ]
+        
+        # Aggressive Strategies
+        aggressive_strategies = [
+            ("Falling Knife Catcher", "Buy when RSI < 20 and price < Bollinger lower, sell when price > EMA 20", "rsi < 20 and price < ema_20", "BUY", "AGGRESSIVE"),
+            ("Volatility Squeeze", "Buy when volume > volume MA and price > Bollinger upper, sell when RSI > 85", "volume_spike == True and price > ema_20", "BUY", "AGGRESSIVE"),
+            ("1-Minute Turbo Scalp", "Buy when EMA 9 > EMA 21, sell when EMA 9 < EMA 21", "price > ema_20", "BUY", "AGGRESSIVE"),
+            ("Smart Reversal Hunter", "Buy when price < EMA 50 and RSI between 35-45, sell when RSI > 60", "price < ema_20 and rsi > 35 and rsi < 45", "BUY", "AGGRESSIVE"),
+            ("Gap Fill Sniper", "Buy when 15m price change < -3%, sell when 15m price change > 1%", "rsi < 30", "BUY", "AGGRESSIVE"),
+        ]
+        
+        for name, desc, logic, action, risk_level in safe_strategies + aggressive_strategies:
+            cur.execute("""
+                INSERT INTO strategies (name, description, logic, action, risk_level, is_active)
+                VALUES (%s, %s, %s, %s, %s, FALSE)
+            """, (name, desc, logic, action, risk_level))
         
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_symbol ON trade_history(symbol);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_time ON trade_history(execution_time);")

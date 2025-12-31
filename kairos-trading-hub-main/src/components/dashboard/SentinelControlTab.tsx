@@ -62,14 +62,28 @@ export function SentinelControlTab({ asset, onAuthorizeTrade, onForceClose }: Se
 
   // Fetch trade settings and AI status on mount
   useEffect(() => {
-    fetchTradeSettings();
-    fetchAIStatus();
-    // Auto-trigger analysis when component mounts (Sentinel tab opened)
-    // Add small delay to avoid immediate trigger on every render
-    const timer = setTimeout(() => {
-      triggerAnalysis();
-    }, 500);
-    return () => clearTimeout(timer);
+    const initialize = async () => {
+      await fetchTradeSettings();
+      await fetchAIStatus();
+      
+      // Wait a bit for settings to load, then check auto-trading status
+      setTimeout(async () => {
+        // Re-fetch settings to ensure we have the latest
+        const response = await fetch("/api/trade-settings");
+        const data = await response.json();
+        const isAutoTrading = data.auto_trading || false;
+        
+        if (!isAutoTrading) {
+          // If auto-trading is OFF, just trigger analysis
+          triggerAnalysis();
+        } else {
+          // If auto-trading is ON, ensure sentinel is running and fetch latest analysis
+          // The sentinel should already be running, just fetch the latest
+          fetchAIAnalysis();
+        }
+      }, 500);
+    };
+    initialize();
   }, []);
 
   const fetchAIStatus = async () => {

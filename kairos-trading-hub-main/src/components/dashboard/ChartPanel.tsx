@@ -35,24 +35,24 @@ export function ChartPanel({ asset, tradingMode, data }: ChartPanelProps) {
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-full">
+    <div className="flex-1 flex flex-col h-full bg-[#111] rounded-3xl border border-[#1f1f22] overflow-hidden">
       {/* Top Bar */}
-      <div className="p-4 border-b border-border bg-card/50">
+      <div className="p-4 border-b border-[#1f1f22]">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-foreground">{asset.pair}</h2>
+            <h2 className="text-lg font-semibold text-white">{asset.pair}</h2>
             <span className={cn(
               "px-2 py-1 rounded text-xs font-medium uppercase tracking-wide",
-              tradingMode === 'scalping' && "bg-scalping/20 text-scalping",
-              tradingMode === 'intraday' && "bg-intraday/20 text-intraday",
-              tradingMode === 'swing' && "bg-swing/20 text-swing",
+              tradingMode === 'scalping' && "bg-emerald-500/20 text-emerald-400",
+              tradingMode === 'intraday' && "bg-blue-500/20 text-blue-400",
+              tradingMode === 'swing' && "bg-purple-500/20 text-purple-400",
             )}>
               {modeConfig.label} Mode
             </span>
           </div>
           <div className={cn(
             "flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono text-sm",
-            isPositive ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+            isPositive ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
           )}>
             {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
             {isPositive ? '+' : ''}{asset.change24h.toFixed(2)}%
@@ -62,13 +62,12 @@ export function ChartPanel({ asset, tradingMode, data }: ChartPanelProps) {
         {/* Metrics Row */}
         <div className="grid grid-cols-4 gap-4">
           {isLoading ? (
-            // Skeleton for metrics
             [...Array(4)].map((_, i) => (
               <div key={i} className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-muted animate-pulse" />
+                <div className="w-4 h-4 rounded bg-[#27272a] animate-pulse" />
                 <div>
-                  <div className="h-3 bg-muted rounded w-16 mb-1 animate-pulse" />
-                  <div className="h-4 bg-muted rounded w-20 animate-pulse" />
+                  <div className="h-3 bg-[#27272a] rounded w-16 mb-1 animate-pulse" />
+                  <div className="h-4 bg-[#27272a] rounded w-20 animate-pulse" />
                 </div>
               </div>
             ))
@@ -77,13 +76,13 @@ export function ChartPanel({ asset, tradingMode, data }: ChartPanelProps) {
               <div key={metric.label} className="flex items-center gap-2">
                 <metric.icon className={cn(
                   "w-4 h-4",
-                  metric.positive ? "text-success" : metric.negative ? "text-destructive" : "text-muted-foreground"
+                  metric.positive ? "text-emerald-400" : metric.negative ? "text-red-400" : "text-[#888]"
                 )} />
                 <div>
-                  <div className="text-xs text-muted-foreground">{metric.label}</div>
+                  <div className="text-xs text-[#888]">{metric.label}</div>
                   <div className={cn(
                     "font-mono text-sm font-medium",
-                    metric.positive ? "text-success" : metric.negative ? "text-destructive" : "text-foreground"
+                    metric.positive ? "text-emerald-400" : metric.negative ? "text-red-400" : "text-white"
                   )}>
                     {metric.value}
                   </div>
@@ -95,45 +94,32 @@ export function ChartPanel({ asset, tradingMode, data }: ChartPanelProps) {
       </div>
 
       {/* Main Chart Area */}
-      <div className="flex-1 relative bg-background/50 min-h-0">
+      <div className="flex-1 relative min-h-0 bg-[#111]">
         {/* AI Sentinel Badge */}
-        <div className="absolute top-4 left-4 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/90 border border-border backdrop-blur-sm">
+        <div className="absolute top-4 left-4 z-10 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#1f1f22]/90 border border-[#27272a] backdrop-blur-sm">
           <div className="relative w-2 h-2">
             <div className="absolute inset-0 rounded-full bg-primary animate-ping opacity-75" />
             <div className="relative w-2 h-2 rounded-full bg-primary" />
           </div>
-          <span className="text-xs font-mono text-muted-foreground animate-scan">
+          <span className="text-xs font-mono text-[#888]">
             AI Sentinel: <span className="text-primary">SCANNING...</span>
           </span>
         </div>
 
-        {/* Chart Placeholder */}
-        <div className="absolute inset-0 w-full h-full">
+        {/* Chart - Full Cover */}
+        <div className="absolute inset-0 w-full h-full bg-[#111]">
           {data && data.length > 0 ? (
             <TradingChart data={data} />
           ) : (
-            // Loading State (Keeps the placeholder look until data arrives)
-            <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full bg-[#111]">
               <div className="text-center animate-pulse">
-                <BarChart3 className="w-16 h-16 mx-auto mb-4 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">
+                <BarChart3 className="w-16 h-16 mx-auto mb-4 text-[#888]/30" />
+                <p className="text-sm text-[#888]">
                   Waiting for Live Market Data...
                 </p>
               </div>
             </div>
           )}
-        </div>
-
-        {/* Grid Lines (decorative) */}
-        <div className="absolute inset-0 pointer-events-none opacity-20">
-          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
-                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-muted" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid)" />
-          </svg>
         </div>
       </div>
     </div>

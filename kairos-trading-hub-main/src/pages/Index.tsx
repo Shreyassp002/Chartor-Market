@@ -1,9 +1,15 @@
 import { useState, useEffect } from "react";
-import { LeftSidebar } from "@/components/dashboard/LeftSidebar";
+import { TopNavbar } from "@/components/dashboard/TopNavbar";
 import { ChartPanel } from "@/components/dashboard/ChartPanel";
 import { TerminalLog } from "@/components/dashboard/TerminalLog";
-import { RightPanel } from "@/components/dashboard/RightPanel";
-import { Asset, TradingMode, LogEntry, ChatMessage, MOCK_ASSETS } from "@/types/trading";
+import { FloatingChat } from "@/components/dashboard/FloatingChat";
+import { MarketTicker } from "@/components/dashboard/MarketTicker";
+import { SentinelControlTab } from "@/components/dashboard/SentinelControlTab";
+import { StrategiesTab } from "@/components/dashboard/StrategiesTab";
+import { TradesHistoryTab } from "@/components/dashboard/TradesHistoryTab";
+import { PositionsTab } from "@/components/dashboard/PositionsTab";
+import { RiskMetricsTab } from "@/components/dashboard/RiskMetricsTab";
+import { Asset, TradingMode, LogEntry, ChatMessage } from "@/types/trading";
 import { toast } from "@/hooks/use-toast";
 
 const INITIAL_LOGS: LogEntry[] = [
@@ -17,6 +23,7 @@ const Index = () => {
   const [tradingMode, setTradingMode] = useState<TradingMode>('intraday');
   const [selectedAsset, setSelectedAsset] = useState('BTC'); // Default UI Selection
   const [activeSymbol, setActiveSymbol] = useState("cmt_btcusdt"); // Default API Symbol
+  const [activeTab, setActiveTab] = useState("sentinel"); // Top nav active tab
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
@@ -212,8 +219,8 @@ const Index = () => {
 
   const handleForceClose = async () => {
     try {
-      addLog('risk', 'EMERGENCY: Force liquidation triggered');
-      toast({ title: 'Force Liquidation', description: 'Closing all positions...', variant: 'destructive' });
+    addLog('risk', 'EMERGENCY: Force liquidation triggered');
+    toast({ title: 'Force Liquidation', description: 'Closing all positions...', variant: 'destructive' });
       
       const response = await fetch("/api/force-close", {
         method: "POST"
@@ -286,36 +293,97 @@ const Index = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Render active tab content
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case "sentinel":
+        return (
+          <SentinelControlTab
+            asset={currentAsset}
+            onAuthorizeTrade={handleAuthorizeTrade}
+            onForceClose={handleForceClose}
+          />
+        );
+      case "strategies":
+        return <StrategiesTab />;
+      case "trade":
+        return <TradesHistoryTab />;
+      case "positions":
+        return <PositionsTab />;
+      case "metrics":
+        return <RiskMetricsTab />;
+      default:
+        return (
+          <SentinelControlTab
+            asset={currentAsset}
+            onAuthorizeTrade={handleAuthorizeTrade}
+            onForceClose={handleForceClose}
+          />
+        );
+    }
+  };
+
   return (
-    <div className="h-screen w-full flex bg-background overflow-hidden">
-      {/* Left Sidebar - Navigation */}
-      <LeftSidebar
+    <div className="min-h-screen w-full bg-[#09090b]">
+      {/* Top Navigation Bar */}
+      <TopNavbar
         tradingMode={tradingMode}
         onModeChange={handleModeChange}
-        assets={assets}
-        selectedAsset={selectedAsset}
-        onAssetSelect={handleAssetSelect}
-        isLoading={isLoadingAssets}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
       />
 
-      {/* Center Panel - Charts & Logs */}
-      <main className="flex-1 flex flex-col h-full min-w-0">
-        {/* CRITICAL: Passing real 'chartData' to the component */}
+      {/* Main Content Area - Below Navbar */}
+      <div className="pt-16 pb-6">
+        <div className="max-w-[1600px] mx-auto px-6 py-6">
+          <div className="grid grid-cols-12 gap-6">
+            {/* Left Column - Chart (75% / 9 columns) */}
+            <div className="col-span-12 lg:col-span-9 flex flex-col gap-4">
         <ChartPanel
           asset={currentAsset}
           tradingMode={tradingMode}
           data={chartData}
         />
+              <div className="bg-[#111] rounded-3xl border border-[#1f1f22] overflow-hidden">
         <TerminalLog logs={logs} />
-      </main>
+              </div>
+            </div>
 
-      {/* Right Panel - AI Chat & Execution */}
-      <RightPanel
-        asset={currentAsset}
+            {/* Right Column - Market Ticker & Tab Content (25% / 3 columns) */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-4">
+              {/* Market Ticker */}
+              <div className="bg-[#111] rounded-3xl p-4 border border-[#1f1f22]">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white uppercase tracking-wide">
+                    Market
+                  </h3>
+                  <span className="text-xs text-[#888]">{assets.length} assets</span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                  <MarketTicker
+                    assets={assets}
+                    selectedAsset={selectedAsset}
+                    onAssetSelect={handleAssetSelect}
+                    isLoading={isLoadingAssets}
+                  />
+                </div>
+              </div>
+
+              {/* Tab Content Panel */}
+              <div className="bg-[#111] rounded-3xl border border-[#1f1f22] overflow-hidden min-h-[400px]">
+                <div className="h-full max-h-[600px] overflow-y-auto custom-scrollbar">
+                  {renderTabContent()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating AI Chat */}
+      <FloatingChat
         messages={chatMessages}
         onSendMessage={handleSendMessage}
-        onAuthorizeTrade={handleAuthorizeTrade}
-        onForceClose={handleForceClose}
       />
     </div>
   );
