@@ -149,7 +149,7 @@ class WeexClient:
         print("Network Blocked. Using Simulation Data.")
         return self._generate_mock_candles(limit)
 
-    def place_order(self, side="buy", size="10", symbol="cmt_btcusdt", order_type="market", price=None, 
+    def place_order(self, side="buy", size="10", symbol="cmt_ethusdt", order_type="market", price=None, 
                     client_oid=None, preset_take_profit=None, preset_stop_loss=None):
         """
         Places an order on WEEX using /capi/v2/order/placeOrder endpoint
@@ -295,16 +295,22 @@ class WeexClient:
         endpoint = "/capi/v2/account/assets"
         return self._send_weex_request("GET", endpoint)
     
-    def set_leverage(self, symbol="cmt_btcusdt", leverage=10):
+    def set_leverage(self, symbol="cmt_btcusdt", leverage=20, margin_mode=1):
         """
-        REQUIRED: Sets leverage before you can trade
+        Sets leverage for trading (both long and short positions)
+        
+        Args:
+            symbol: Trading pair (e.g., "cmt_btcusdt")
+            leverage: Leverage multiplier (default: 20)
+            margin_mode: 1=Cross Mode, 3=Isolated Mode (default: 1)
         """
         params = {
             "symbol": symbol,
-            "leverage": leverage,
-            "side": 1  
+            "marginMode": margin_mode,
+            "longLeverage": str(leverage),
+            "shortLeverage": str(leverage)
         }
-        endpoint = "/api/contract/Account_API/AdjustLeverage"
+        endpoint = "/capi/v2/account/leverage"
         return self._send_weex_request("POST", endpoint, params)
     
     def get_positions(self):
