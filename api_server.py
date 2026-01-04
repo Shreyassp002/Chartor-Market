@@ -320,6 +320,9 @@ def sentinel_loop():
                                     
                                     # Upload AI log to WEEX for compliance
                                     try:
+                                        # Use 'reason' variable which is defined in the scope
+                                        reasoning_text = reason if 'reason' in locals() else f"Strategy '{strategy_name}' triggered" if strategy_name else "Auto-trade decision"
+                                        
                                         ai_log_input = {
                                             "market_data": {
                                                 "symbol": symbol,
@@ -336,12 +339,12 @@ def sentinel_loop():
                                         ai_log_output = {
                                             "decision": decision,
                                             "confidence": confidence,
-                                            "reasoning": reasoning[:500] if reasoning else "",
+                                            "reasoning": reasoning_text[:500] if reasoning_text else "",
                                             "ml_agrees": ml_agrees,
                                             "strategy": strategy_name or "Hybrid Auto-Trade"
                                         }
                                         
-                                        explanation = f"AI analyzed {symbol} with RSI {market_state.get('rsi', 50):.1f}, trend {market_state.get('trend', 'Neutral')}. Decision: {decision} with {confidence}% confidence. ML model {('agreed' if ml_agrees else 'disagreed')}. Reasoning: {reasoning[:400] if reasoning else 'N/A'}"
+                                        explanation = f"AI analyzed {symbol} with RSI {market_state.get('rsi', 50):.1f}, trend {market_state.get('trend', 'Neutral')}. Decision: {decision} with {confidence}% confidence. ML model {('agreed' if ml_agrees else 'disagreed')}. Reasoning: {reasoning_text[:400] if reasoning_text else 'N/A'}"
                                         
                                         client.upload_ai_log(
                                             order_id=order_id,
@@ -354,6 +357,8 @@ def sentinel_loop():
                                         print(f"   AI Log uploaded for order {order_id}")
                                     except Exception as ai_log_err:
                                         print(f"   AI Log upload failed: {ai_log_err}")
+                                        import traceback
+                                        traceback.print_exc()
                                     current_price = float(market_state.get('price', 0))
                                     confluence_note = " [CONFLUENCE]" if ml_agrees else ""
                                     log_message = f"AUTO-EXECUTED {decision} on {symbol}{confluence_note} | Confidence: {confidence}% | ML: {ml_prediction.get('direction') if ml_prediction else 'N/A'} | Sentiment: {sentiment.get('label')} | Order ID: {order_id}"
