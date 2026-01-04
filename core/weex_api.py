@@ -321,6 +321,78 @@ class WeexClient:
         res = self._send_weex_request("GET", endpoint)
         return res
     
+    def get_all_positions(self):
+        """
+        Gets all positions using /capi/v2/account/position/allPosition endpoint
+        Weight(IP): 10, Weight(UID): 15
+        Returns array of position objects
+        """
+        endpoint = "/capi/v2/account/position/allPosition"
+        res = self._send_weex_request("GET", endpoint)
+        return res
+    
+    def get_current_plan_orders(self, symbol=None, order_id=None, start_time=None, end_time=None, limit=100, page=0):
+        """
+        Gets current plan orders using /capi/v2/order/currentPlan endpoint
+        Weight(IP): 3, Weight(UID): 3
+        
+        Args:
+            symbol: Trading pair (optional)
+            order_id: OrderId (optional)
+            start_time: The record start time for the query (Unix millisecond timestamp, optional)
+            end_time: The end time of the record for the query (Unix millisecond timestamp, optional)
+            limit: Limit number default 100 max 100 (optional)
+            page: Page number default 0 (optional)
+        """
+        endpoint = "/capi/v2/order/currentPlan"
+        params = {}
+        if symbol:
+            params["symbol"] = symbol
+        if order_id:
+            params["orderId"] = str(order_id)
+        if start_time:
+            params["startTime"] = str(start_time)
+        if end_time:
+            params["endTime"] = str(end_time)
+        if limit:
+            params["limit"] = str(limit)
+        if page is not None:
+            params["page"] = str(page)
+        
+        res = self._send_weex_request("GET", endpoint, params if params else None)
+        return res
+    
+    def get_current_orders(self, symbol=None, order_id=None, start_time=None, end_time=None, limit=100, page=0):
+        """
+        Gets current orders using /capi/v2/order/current endpoint
+        Weight(IP): 2, Weight(UID): 2
+        
+        Args:
+            symbol: Trading pair (optional)
+            order_id: OrderId (optional)
+            start_time: The record start time for the query (Unix millisecond timestamp, optional)
+            end_time: The end time of the record for the query (Unix millisecond timestamp, optional)
+            limit: Limit number default 100 max 100 (optional)
+            page: Page number default 0 (optional)
+        """
+        endpoint = "/capi/v2/order/current"
+        params = {}
+        if symbol:
+            params["symbol"] = symbol
+        if order_id:
+            params["orderId"] = str(order_id)
+        if start_time:
+            params["startTime"] = str(start_time)
+        if end_time:
+            params["endTime"] = str(end_time)
+        if limit:
+            params["limit"] = str(limit)
+        if page is not None:
+            params["page"] = str(page)
+        
+        res = self._send_weex_request("GET", endpoint, params if params else None)
+        return res
+    
     def close_all_positions(self):
         """Closes all open positions."""
         try:

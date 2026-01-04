@@ -1204,31 +1204,90 @@ def force_close_all():
         return {"status": "error", "msg": str(e)}
 
 @app.get("/api/trade-history")
-def get_trade_history(limit: int = 50, symbol: str = None):
+def get_trade_history(limit: int = 100, symbol: str = None):
     """
-    Fetches trade history, optionally filtered by symbol.
+    Fetches current orders from WEEX API using /capi/v2/order/current
     """
-    from core.db_manager import get_trade_history
-    
     try:
-        trades = get_trade_history(limit=limit, symbol=symbol)
+        # Call WEEX API to get current orders
+        weex_orders = client.get_current_orders(symbol=symbol, limit=limit)
         
-        # Format trades for frontend
+        if not weex_orders:
+            return {"status": "success", "trades": [], "count": 0}
+        
+        # Handle different response formats
+        orders_data = []
+        if isinstance(weex_orders, list):
+            orders_data = weex_orders
+        elif isinstance(weex_orders, dict):
+            if weex_orders.get("code") == "00000" and weex_orders.get("data"):
+                orders_data = weex_orders.get("data", [])
+            elif isinstance(weex_orders.get("data"), list):
+                orders_data = weex_orders.get("data", [])
+        
         formatted_trades = []
-        for trade in trades:
-            formatted_trades.append({
-                "id": trade.get("id"),
-                "symbol": trade.get("symbol"),
-                "side": trade.get("side"),
-                "size": float(trade.get("size", 0)),
-                "price": float(trade.get("price", 0)) if trade.get("price") else None,
-                "order_id": trade.get("order_id"),
-                "status": trade.get("status"),
-                "pnl": float(trade.get("pnl", 0)) if trade.get("pnl") is not None else None,
-                "fees": float(trade.get("fees", 0)) if trade.get("fees") is not None else None,
-                "execution_time": str(trade.get("execution_time")),
-                "notes": trade.get("notes")
-            })
+        for order in orders_data:
+            try:
+                order_id = str(order.get("order_id", ""))
+                symbol_order = order.get("symbol", "")
+                order_type = order.get("type", "")
+                
+                # Convert order type to side (open_long -> buy, open_short -> sell)
+                side = "buy"
+                if "short" in order_type.lower() or "sell" in order_type.lower():
+                    side = "sell"
+                elif "long" in order_type.lower() or "buy" in order_type.lower():
+                    side = "buy"
+                
+                size = float(order.get("size", 0))
+                price_avg = order.get("price_avg")
+                price = order.get("price")
+                
+                # Use price_avg if available (filled orders), otherwise use price (pending orders)
+                execution_price = float(price_avg) if price_avg and float(price_avg) > 0 else (float(price) if price else None)
+                
+                status = order.get("status", "open")
+                fee = float(order.get("fee", 0)) if order.get("fee") else 0
+                total_profits = float(order.get("totalProfits", 0)) if order.get("totalProfits") else None
+                
+                create_time = order.get("createTime")
+                execution_time = ""
+                if create_time:
+                    from datetime import datetime
+                    try:
+                        # Convert milliseconds timestamp to ISO string
+                        execution_time = datetime.fromtimestamp(int(create_time) / 1000).isoformat()
+                    except:
+                        execution_time = str(create_time)
+                
+                # Generate a numeric ID from order_id (fallback to hash)
+                numeric_id = 0
+                try:
+                    if order_id and order_id.isdigit():
+                        numeric_id = int(order_id)
+                    else:
+                        numeric_id = abs(hash(order_id)) % (10 ** 9)
+                except:
+                    numeric_id = abs(hash(str(order))) % (10 ** 9)
+                
+                formatted_trades.append({
+                    "id": numeric_id,
+                    "symbol": symbol_order,
+                    "side": side,
+                    "size": size,
+                    "price": execution_price,
+                    "order_id": order_id,
+                    "status": status,
+                    "pnl": total_profits,
+                    "fees": fee if fee > 0 else None,
+                    "execution_time": execution_time,
+                    "notes": f"Order type: {order_type}"
+                })
+            except Exception as e:
+                print(f"Error formatting order: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
         
         return {"status": "success", "trades": formatted_trades, "count": len(formatted_trades)}
     except Exception as e:
@@ -1240,64 +1299,80 @@ def get_trade_history(limit: int = 50, symbol: str = None):
 @app.get("/api/positions")
 def get_positions():
     """
-    Fetches all open positions with updated current prices and P&L.
+    Fetches all open positions from WEEX API using /capi/v2/account/position/allPosition
     """
-    from core.db_manager import get_open_positions, update_or_create_position
-    
     try:
-        positions = get_open_positions()
+        # Call WEEX API to get all positions
+        weex_positions = client.get_all_positions()
         
-        # Update current prices and P&L for each position
+        if not weex_positions:
+            return {"status": "success", "positions": [], "count": 0}
+        
+        # Handle different response formats
+        positions_data = []
+        if isinstance(weex_positions, list):
+            positions_data = weex_positions
+        elif isinstance(weex_positions, dict):
+            if weex_positions.get("code") == "00000" and weex_positions.get("data"):
+                positions_data = weex_positions.get("data", [])
+            elif isinstance(weex_positions.get("data"), list):
+                positions_data = weex_positions.get("data", [])
+        
         formatted_positions = []
-        for pos in positions:
-            symbol = pos.get("symbol")
-            side = pos.get("side")
-            size = float(pos.get("size", 0))
-            entry_price = float(pos.get("entry_price", 0))
-            
-            # Fetch current price
+        for pos in positions_data:
             try:
-                candles = client.fetch_candles(symbol=symbol, limit=1)
-                if candles and len(candles) > 0:
-                    current_price = float(candles[0][4])  # Close price
-                    
-                    # Calculate unrealized P&L
-                    if side == "buy":
-                        unrealized_pnl = (current_price - entry_price) * size
-                    else:  # sell/short
-                        unrealized_pnl = (entry_price - current_price) * size
-                    
-                    # Update position in database
-                    update_or_create_position({
-                        "symbol": symbol,
-                        "side": side,
-                        "size": size,
-                        "entry_price": entry_price,
-                        "current_price": current_price,
-                        "unrealized_pnl": unrealized_pnl,
-                        "leverage": int(pos.get("leverage", 1)),
-                        "order_id": pos.get("order_id")
-                    })
+                symbol = pos.get("symbol", "")
+                side_raw = pos.get("side", "LONG")
+                # Convert LONG/SHORT to buy/sell for frontend
+                side = "buy" if side_raw.upper() == "LONG" else "sell"
+                size = float(pos.get("size", 0))
+                leverage = float(pos.get("leverage", 1))
+                unrealized_pnl = float(pos.get("unrealizePnl", 0)) if pos.get("unrealizePnl") else 0
+                open_value = float(pos.get("open_value", 0)) if pos.get("open_value") else 0
+                
+                # Calculate entry price from open_value and size
+                entry_price = (open_value / size) if size > 0 else 0
+                
+                # Get current price from candles for display
+                current_price = None
+                try:
+                    candles = client.fetch_candles(symbol=symbol, limit=1)
+                    if candles and len(candles) > 0:
+                        current_price = float(candles[0][4])  # Close price
+                except:
+                    pass
+                
+                # If we can't calculate entry_price from open_value, use a fallback
+                if entry_price == 0 and current_price:
+                    entry_price = current_price
+                
+                created_time = pos.get("created_time")
+                if created_time:
+                    from datetime import datetime
+                    try:
+                        opened_at = datetime.fromtimestamp(int(created_time) / 1000).isoformat()
+                    except:
+                        opened_at = str(created_time)
                 else:
-                    current_price = pos.get("current_price")
-                    unrealized_pnl = pos.get("unrealized_pnl")
+                    opened_at = ""
+                
+                formatted_positions.append({
+                    "id": pos.get("id") or pos.get("position_id", 0),
+                    "symbol": symbol,
+                    "side": side,
+                    "size": size,
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "unrealized_pnl": unrealized_pnl,
+                    "leverage": int(leverage),
+                    "opened_at": opened_at,
+                    "updated_at": str(pos.get("updated_time", "")) if pos.get("updated_time") else opened_at
+                })
             except Exception as e:
-                print(f"Error updating price for {symbol}: {e}")
-                current_price = pos.get("current_price")
-                unrealized_pnl = pos.get("unrealized_pnl")
-            
-            formatted_positions.append({
-                "id": pos.get("id"),
-                "symbol": symbol,
-                "side": side,
-                "size": size,
-                "entry_price": entry_price,
-                "current_price": float(current_price) if current_price else None,
-                "unrealized_pnl": float(unrealized_pnl) if unrealized_pnl is not None else None,
-                "leverage": int(pos.get("leverage", 1)),
-                "opened_at": str(pos.get("opened_at")),
-                "updated_at": str(pos.get("updated_at"))
-            })
+                print(f"Error formatting position: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
         
         return {"status": "success", "positions": formatted_positions, "count": len(formatted_positions)}
     except Exception as e:
@@ -1469,78 +1544,6 @@ def get_risk_metrics():
         import traceback
         traceback.print_exc()
         return {"status": "error", "msg": str(e), "metrics": None}
-    """
-    Closes a single position.
-    """
-    from core.db_manager import get_open_positions, close_position, save_trade
-    
-    try:
-        symbol = request.get('symbol')
-        side = request.get('side')
-        
-        if not symbol or not side:
-            return {"status": "error", "msg": "Symbol and side are required"}
-        
-        # Get the position
-        positions = get_open_positions()
-        position = next((p for p in positions if p.get('symbol') == symbol and p.get('side') == side), None)
-        
-        if not position:
-            return {"status": "error", "msg": "Position not found"}
-        
-        size = str(position.get('size', 0))
-        close_side = "sell" if side == "buy" else "buy"
-        
-        # Close position on WEEX
-        result = client.close_position(symbol, close_side, size)
-        
-        if result and result.get("code") == "00000":
-            # Get current price
-            try:
-                candles = client.fetch_candles(symbol=symbol, limit=1)
-                current_price = float(candles[0][4]) if candles and len(candles) > 0 else position.get('entry_price', 0)
-            except:
-                current_price = position.get('entry_price', 0)
-            
-            # Calculate realized P&L
-            entry_price = float(position.get('entry_price', 0))
-            size_float = float(size)
-            if side == "buy":
-                realized_pnl = (current_price - entry_price) * size_float
-            else:
-                realized_pnl = (entry_price - current_price) * size_float
-            
-            # Save close trade
-            order_id = result.get('data', {}).get('orderId', 'close-' + str(int(time.time()))) if isinstance(result.get('data'), dict) else 'close-' + str(int(time.time()))
-            save_trade({
-                "symbol": symbol,
-                "side": close_side,
-                "size": size_float,
-                "price": current_price,
-                "order_id": str(order_id),
-                "order_type": "market",
-                "status": "filled",
-                "pnl": realized_pnl,
-                "notes": f"Manual close: {side} position"
-            })
-            
-            # Remove from open positions
-            close_position(symbol, side)
-            
-            return {
-                "status": "success",
-                "msg": f"Position closed successfully",
-                "pnl": realized_pnl,
-                "order_id": str(order_id)
-            }
-        else:
-            return {"status": "error", "msg": result.get('msg', 'Unknown error') if result else 'No response from WEEX'}
-            
-    except Exception as e:
-        print(f"Close Position Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"status": "error", "msg": str(e)}
 
 @app.on_event("startup")
 async def startup_event():
