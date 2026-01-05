@@ -464,7 +464,7 @@ def stop_sentinel():
 # This allows your frontend (localhost:8080 or 5173) to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for Hackathon demo
+    allow_origins=["https://chartor-market.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
