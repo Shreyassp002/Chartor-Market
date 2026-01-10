@@ -1922,6 +1922,226 @@ Return ONLY the Python expression, nothing else. No explanations, no markdown, j
         traceback.print_exc()
         return {"status": "error", "msg": str(e)}
 
+# ============================================================================
+# INSTITUTIONAL TRADING SYSTEM ENDPOINTS
+# ============================================================================
+
+# Global orchestrator instance
+orchestrator_instance = None
+orchestrator_thread_inst = None
+
+class InstitutionalTradingConfig(BaseModel):
+    enabled: bool
+    initial_equity: float = 10000.0
+    leverage: float = 20.0
+    min_signal_strength: float = 60.0
+
+@app.post("/api/institutional/start")
+async def start_institutional_trading(config: InstitutionalTradingConfig):
+    """Start the institutional trading orchestrator"""
+    global orchestrator_instance, orchestrator_thread_inst
+    
+    try:
+        if orchestrator_instance is not None:
+            return {"status": "error", "msg": "Institutional trading already running"}
+        
+        # Import here to avoid circular dependencies
+        from trading_orchestrator import TradingOrchestrator
+        import logging
+        
+        # Setup logger
+        logger = logging.getLogger("InstitutionalTrading")
+        logger.setLevel(logging.INFO)
+        
+        # Create orchestrator
+        orchestrator_instance = TradingOrchestrator(
+            weex_client=client,
+            initial_equity=config.initial_equity,
+            logger=logger
+        )
+        
+        # Start in background thread
+        def run_orchestrator():
+            orchestrator_instance.run_continuous()
+        
+        orchestrator_thread_inst = threading.Thread(target=run_orchestrator, daemon=True)
+        orchestrator_thread_inst.start()
+        
+        return {
+            "status": "success",
+            "msg": "Institutional trading system started",
+            "config": {
+                "initial_equity": config.initial_equity,
+                "leverage": config.leverage,
+                "min_signal_strength": config.min_signal_strength,
+                "enabled_symbols": orchestrator_instance.ENABLED_SYMBOLS
+            }
+        }
+        
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
+@app.post("/api/institutional/stop")
+async def stop_institutional_trading():
+    """Stop the institutional trading orchestrator"""
+    global orchestrator_instance, orchestrator_thread_inst
+    
+    try:
+        if orchestrator_instance is None:
+            return {"status": "error", "msg": "Institutional trading not running"}
+        
+        # Close all positions
+        for symbol in list(orchestrator_instance.risk_manager.positions.keys()):
+            df = orchestrator_instance.fetch_market_data(symbol)
+            if df is not None:
+                current_price = df['close'].iloc[-1]
+                orchestrator_instance.close_position(symbol, current_price, "User stopped system")
+        
+        # Stop orchestrator
+        orchestrator_instance = None
+        orchestrator_thread_inst = None
+        
+        return {"status": "success", "msg": "Institutional trading stopped"}
+        
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
+@app.get("/api/institutional/status")
+async def get_institutional_status():
+    """Get current status of institutional trading system"""
+    global orchestrator_instance
+    
+    try:
+        if orchestrator_instance is None:
+            return {
+                "status": "stopped",
+                "running": False
+            }
+        
+        # Get portfolio risk
+        portfolio_risk = orchestrator_instance.risk_manager.get_portfolio_risk()
+        
+        # Get execution stats
+        exec_stats = orchestrator_instance.execution_engine.get_execution_statistics()
+        
+        # Get current positions
+        positions = []
+        for symbol, pos in orchestrator_instance.risk_manager.positions.items():
+            df = orchestrator_instance.fetch_market_data(symbol)
+            if df is not None:
+                current_price = df['close'].iloc[-1]
+                position_risk = orchestrator_instance.risk_manager.update_position(
+                    symbol, current_price, pos.get('atr', 0)
+                )
+                
+                positions.append({
+                    "symbol": symbol,
+                    "direction": pos["direction"],
+                    "entry_price": pos["entry_price"],
+                    "current_price": current_price,
+                    "size": pos["size"],
+                    "unrealized_pnl": position_risk.unrealized_pnl,
+                    "unrealized_pnl_pct": position_risk.unrealized_pnl_pct,
+                    "stop_loss": pos["stop_loss"],
+                    "take_profit": pos["take_profit"],
+                    "trailing_stop": pos.get("trailing_stop"),
+                    "time_in_position": position_risk.time_in_position
+                })
+        
+        # Get asset scores
+        asset_scores = []
+        for symbol, score in orchestrator_instance.asset_scores.items():
+            asset_scores.append({
+                "symbol": symbol,
+                "score": score.score,
+                "signal": score.signal,
+                "confidence": score.confidence,
+                "regime": score.regime
+            })
+        
+        return {
+            "status": "running",
+            "running": True,
+            "cycle_count": orchestrator_instance.cycle_count,
+            "last_cycle": orchestrator_instance.last_cycle_time.isoformat(),
+            "portfolio": {
+                "total_equity": portfolio_risk.total_equity,
+                "available_equity": portfolio_risk.available_equity,
+                "used_margin": portfolio_risk.used_margin,
+                "exposure_pct": portfolio_risk.exposure_pct,
+                "daily_pnl": portfolio_risk.daily_pnl,
+                "daily_pnl_pct": portfolio_risk.daily_pnl_pct,
+                "open_positions": portfolio_risk.open_positions,
+                "drawdown_from_peak": portfolio_risk.drawdown_from_peak,
+                "can_trade": portfolio_risk.can_trade,
+                "risk_alerts": portfolio_risk.risk_alerts
+            },
+            "execution": exec_stats,
+            "positions": positions,
+            "asset_scores": asset_scores,
+            "statistics": {
+                "trades_executed": orchestrator_instance.trades_executed,
+                "signals_generated": orchestrator_instance.total_signals_generated,
+                "signals_filtered_by_regime": orchestrator_instance.signals_filtered_by_regime,
+                "signals_filtered_by_risk": orchestrator_instance.signals_filtered_by_risk
+            },
+            "current_regime": orchestrator_instance.current_regime.regime.value if orchestrator_instance.current_regime else None
+        }
+        
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
+@app.get("/api/institutional/trades")
+async def get_institutional_trades():
+    """Get trade history from institutional system"""
+    global orchestrator_instance
+    
+    try:
+        if orchestrator_instance is None:
+            return {"status": "error", "msg": "Institutional trading not running", "trades": []}
+        
+        trades = []
+        for trade in orchestrator_instance.risk_manager.position_history:
+            trades.append({
+                "symbol": trade["symbol"],
+                "direction": trade["direction"],
+                "entry_price": trade["entry_price"],
+                "exit_price": trade["exit_price"],
+                "size": trade["size"],
+                "realized_pnl": trade["realized_pnl"],
+                "realized_pnl_pct": trade["realized_pnl_pct"],
+                "entry_time": trade["entry_time"].isoformat(),
+                "exit_time": trade["exit_time"].isoformat(),
+                "hold_time_hours": trade["hold_time_hours"],
+                "exit_reason": trade["exit_reason"]
+            })
+        
+        return {
+            "status": "success",
+            "trades": trades,
+            "total_trades": len(trades)
+        }
+        
+    except Exception as e:
+        return {"status": "error", "msg": str(e), "trades": []}
+
+@app.post("/api/institutional/backtest")
+async def run_backtest(background_tasks: BackgroundTasks):
+    """Run backtest of institutional system"""
+    try:
+        from backtest.backtest_engine import BacktestEngine, BacktestConfig
+        from strategy.intraday_engine import IntradayMomentumEngine
+        from regime.ofras import OFRASRegimeDetector
+        
+        # This would need historical data - placeholder for now
+        return {
+            "status": "info",
+            "msg": "Backtesting requires historical data feed. Implementation pending."
+        }
+        
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     # Runs on localhost:8000
