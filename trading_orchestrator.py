@@ -488,6 +488,30 @@ class TradingOrchestrator:
                 self.logger.warning(f"Cannot open position - insufficient capital or risk limits")
                 return
             
+            # Round size based on WEEX stepSize requirements for each symbol
+            # Different symbols have different minimum size increments
+            step_sizes = {
+                "cmt_btcusdt": 0.001,   # BTC: 0.001 increments
+                "cmt_ethusdt": 0.01,    # ETH: 0.01 increments  
+                "cmt_solusdt": 0.1,     # SOL: 0.1 increments
+                "cmt_dogeusdt": 1,      # DOGE: 1 increment
+                "cmt_xrpusdt": 1,       # XRP: 1 increment
+                "cmt_adausdt": 10,      # ADA: 10 increments
+                "cmt_bnbusdt": 0.01,    # BNB: 0.01 increments
+                "cmt_ltcusdt": 0.1      # LTC: 0.1 increments
+            }
+            
+            step_size = step_sizes.get(symbol, 1)
+            # Round down to nearest stepSize multiple
+            size = (size // step_size) * step_size
+            
+            # Ensure minimum size after rounding
+            if size < step_size:
+                self.logger.warning(f"Position size {size} too small for {symbol} (stepSize: {step_size})")
+                return
+            
+            self.logger.info(f"   Rounded size to {size:.4f} (stepSize: {step_size})")
+            
             # Validate order safety
             direction = "LONG" if asset_score.signal == "LONG" else "SHORT"
             is_safe, warnings = self.execution_engine.validate_order_safety(
@@ -498,9 +522,6 @@ class TradingOrchestrator:
             if not is_safe:
                 self.logger.warning(f"Order safety check failed: {warnings}")
                 return
-            
-            # Round size to 4 decimals to match WEEX stepSize requirement
-            size = round(size, 4)
             
             # Execute order
             self.logger.info(f"🎯 Opening {direction} position on {symbol}")
