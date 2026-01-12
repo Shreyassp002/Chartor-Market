@@ -2236,11 +2236,25 @@ institutional_running = False
 @app.post("/api/institutional/start", status_code=200)
 def start_institutional():
     """Start institutional quant trading system - No body required"""
-    global institutional_thread, institutional_running, active_trading_mode
+    global institutional_thread, institutional_running, active_trading_mode, sentinel_running
     
     with trading_mode_lock:
+        # Auto-stop Sentinel if running
         if active_trading_mode == "SENTINEL":
-            return {"status": "error", "msg": "Cannot start - Sentinel AI is running. Stop Sentinel first."}
+            logger.info("🔄 Auto-stopping Sentinel AI to start Institutional mode")
+            sentinel_running = False
+            active_trading_mode = None
+            # Also update trade settings to disable auto_trading
+            try:
+                import sqlite3
+                db_path = "trading_bot.db"
+                conn = sqlite3.connect(db_path)
+                c = conn.cursor()
+                c.execute("UPDATE trade_settings SET auto_trading = 0")
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                logger.warning(f"Could not update trade_settings DB: {db_err}")
         
         if institutional_running:
             return {"status": "info", "msg": "Institutional trading already running"}
