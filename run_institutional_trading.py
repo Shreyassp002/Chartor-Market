@@ -43,8 +43,26 @@ def main(skip_confirmation: bool = False):
         logger.info("Initializing WEEX client...")
         client = WeexClient()
         
-        # Configuration
-        INITIAL_EQUITY = 10000.0  # Starting capital
+        # Fetch real account balance
+        logger.info("Fetching account balance...")
+        try:
+            balance_data = client.get_balance()
+            if balance_data and 'data' in balance_data and len(balance_data['data']) > 0:
+                # Get USDT balance (available_balance is what we can use for new positions)
+                usdt_balance = next((item for item in balance_data['data'] if item['coin_name'] == 'USDT'), None)
+                if usdt_balance:
+                    available_balance = float(usdt_balance.get('available_balance', 0))
+                    INITIAL_EQUITY = available_balance
+                    logger.info(f"✅ Real account balance: ${INITIAL_EQUITY:.2f} USDT")
+                else:
+                    logger.warning("USDT balance not found, using fallback")
+                    INITIAL_EQUITY = 1000.0  # Conservative fallback
+            else:
+                logger.warning("Could not fetch balance, using fallback")
+                INITIAL_EQUITY = 1000.0  # Conservative fallback
+        except Exception as balance_err:
+            logger.error(f"Balance fetch error: {balance_err}")
+            INITIAL_EQUITY = 1000.0  # Conservative fallback
         
         logger.info(f"Configuration:")
         logger.info(f"  Initial Equity: ${INITIAL_EQUITY:,.2f}")
