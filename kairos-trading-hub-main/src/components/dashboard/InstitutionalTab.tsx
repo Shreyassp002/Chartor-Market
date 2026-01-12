@@ -54,10 +54,16 @@ export function InstitutionalTab() {
         setIsLoading(true);
         try {
             const endpoint = isActive ? "/api/institutional/stop" : "/api/institutional/start";
-            const response = await fetch(getApiUrl(endpoint), { method: "POST" });
+            const response = await fetch(getApiUrl(endpoint), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({})
+            });
             const data = await response.json();
 
-            if (data.status === "success") {
+            if (data.status === "success" || data.status === "info") {
                 setIsActive(!isActive);
             } else {
                 alert(data.msg || "Failed to toggle institutional trading");
