@@ -52,9 +52,9 @@ class ExecutionSafetyLayer:
         "cmt_btcusdt": 0.001,
         "cmt_ethusdt": 0.01,
         "cmt_solusdt": 0.1,
-        "cmt_dogeusdt": 10.0,
+        "cmt_dogeusdt": 100.0,  # DOGE requires 100 minimum (WEEX stepSize)
         "cmt_xrpusdt": 1.0,
-        "cmt_adausdt": 1.0,
+        "cmt_adausdt": 10.0,   # ADA requires 10 minimum
         "cmt_bnbusdt": 0.01,
         "cmt_ltcusdt": 0.01
     }

@@ -494,7 +494,7 @@ class TradingOrchestrator:
                 "cmt_btcusdt": 0.001,   # BTC: 0.001 increments
                 "cmt_ethusdt": 0.01,    # ETH: 0.01 increments  
                 "cmt_solusdt": 0.1,     # SOL: 0.1 increments
-                "cmt_dogeusdt": 1,      # DOGE: 1 increment
+                "cmt_dogeusdt": 100,    # DOGE: 100 increment (WEEX requirement)
                 "cmt_xrpusdt": 1,       # XRP: 1 increment
                 "cmt_adausdt": 10,      # ADA: 10 increments
                 "cmt_bnbusdt": 0.01,    # BNB: 0.01 increments
