@@ -2384,6 +2384,69 @@ async def run_backtest(background_tasks: BackgroundTasks):
     except Exception as e:
         return {"status": "error", "msg": str(e)}
 
+# === Institutional Trading Control Endpoints ===
+institutional_thread = None
+institutional_running = False
+
+@app.post("/api/institutional/start")
+def start_institutional():
+    """Start institutional quant trading system"""
+    global institutional_thread, institutional_running, active_trading_mode
+    
+    with trading_mode_lock:
+        if active_trading_mode == "SENTINEL":
+            return {"status": "error", "msg": "Cannot start - Sentinel AI is running. Stop Sentinel first."}
+        
+        if institutional_running:
+            return {"status": "info", "msg": "Institutional trading already running"}
+        
+        try:
+            from run_institutional_trading import main as institutional_main
+            
+            def run_institutional():
+                global institutional_running
+                institutional_running = True
+                try:
+                    institutional_main()
+                except Exception as e:
+                    logger.error(f"Institutional trading error: {e}", exc_info=True)
+                finally:
+                    institutional_running = False
+            
+            institutional_thread = threading.Thread(target=run_institutional, daemon=True)
+            institutional_thread.start()
+            active_trading_mode = "INSTITUTIONAL"
+            
+            logger.info("✅ Institutional trading system started")
+            return {"status": "success", "msg": "Institutional trading started"}
+            
+        except Exception as e:
+            logger.error(f"Failed to start institutional trading: {e}", exc_info=True)
+            return {"status": "error", "msg": str(e)}
+
+@app.post("/api/institutional/stop")
+def stop_institutional():
+    """Stop institutional quant trading system"""
+    global institutional_running, active_trading_mode
+    
+    with trading_mode_lock:
+        if not institutional_running:
+            return {"status": "info", "msg": "Institutional trading not running"}
+        
+        institutional_running = False
+        active_trading_mode = None
+        logger.info("⏸️ Institutional trading system stopped")
+        return {"status": "success", "msg": "Institutional trading stopped"}
+
+@app.get("/api/institutional/status")
+async def get_institutional_status():
+    """Get institutional trading system status"""
+    return {
+        "status": "success",
+        "running": institutional_running,
+        "active_mode": active_trading_mode
+    }
+
 if __name__ == "__main__":
     import uvicorn
     # Runs on localhost:8000

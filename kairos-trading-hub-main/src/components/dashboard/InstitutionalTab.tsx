@@ -55,11 +55,7 @@ export function InstitutionalTab() {
         try {
             const endpoint = isActive ? "/api/institutional/stop" : "/api/institutional/start";
             const response = await fetch(getApiUrl(endpoint), {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({})
+                method: "POST"
             });
             const data = await response.json();
 
