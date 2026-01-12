@@ -302,14 +302,13 @@ class ExecutionEngine:
                 filled_size = size
                 fees = 0.0
                 
-                import time
-                max_retries = 5
+                max_detail_retries = 5
                 retry_delay = 0.5  # 500ms between retries
                 
-                for attempt in range(max_retries):
+                for detail_attempt in range(max_detail_retries):
                     try:
                         # Small delay to let order fill
-                        if attempt > 0:
+                        if detail_attempt > 0:
                             time.sleep(retry_delay)
                         
                         # Try current orders first (for pending/filling orders)
@@ -328,7 +327,7 @@ class ExecutionEngine:
                                     break  # Success!
                         
                         # If not in current orders, try history (for completed orders)
-                        if attempt >= 2:  # Start checking history after 2nd attempt
+                        if detail_attempt >= 2:  # Start checking history after 2nd attempt
                             history = self.client.get_history_orders(symbol=symbol, page_size=10)
                             if history and history.get("code") == "00000":
                                 orders = history.get("data", [])
@@ -345,8 +344,8 @@ class ExecutionEngine:
                                     break  # Found in history
                     
                     except Exception as detail_err:
-                        if attempt == max_retries - 1:  # Last attempt
-                            self.logger.warning(f"Could not fetch order details after {max_retries} attempts: {detail_err}")
+                        if detail_attempt == max_detail_retries - 1:  # Last attempt
+                            self.logger.warning(f"Could not fetch order details after {max_detail_retries} attempts: {detail_err}")
                         continue
                 
                 # Final validation - never use 0 price
