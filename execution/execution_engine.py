@@ -218,12 +218,11 @@ class ExecutionEngine:
             try:
                 self.logger.info(f"Executing {side} order for {symbol}, size: {size} (attempt {attempt + 1}/{max_retries})")
                 
-                # Execute order via WEEX client
+                # Execute order via WEEX client (market order by default)
                 response = self.client.execute_order(
                     side=side,
                     size=str(size),
-                    symbol=symbol,
-                    order_type="market"
+                    symbol=symbol
                 )
                 
                 # Parse response
