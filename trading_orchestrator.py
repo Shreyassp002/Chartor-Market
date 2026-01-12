@@ -258,18 +258,22 @@ class TradingOrchestrator:
                 if gemini_decision == signal_result.signal:
                     gemini_approved = True
                 
-            # Log all AI components
+            # Log all AI components (wrapped in try-except to prevent logging errors)
             if signal_result.signal in ["LONG", "SHORT"]:
-                self.logger.info(f"      📰 Sentiment ({sentiment_data['source']}): {sentiment_label} (score: {sentiment_score:.2f})")
-                if sentiment_data.get('latest_headline'):
-                    self.logger.info(f"         {sentiment_data['latest_headline'][:80]}...")
-                
-                if ml_prediction:
-                    self.logger.info(f"      🤖 Local ML: Predicts {ml_direction} ({ml_confidence}% confidence)")
-                
-                if gemini_decision != "NEUTRAL":
-                    approval_emoji = "✅" if gemini_approved else "⚠️"
-                    self.logger.info(f"      {approval_emoji} Gemini AI: {gemini_decision} ({gemini_confidence}% confidence)")
+                try:
+                    self.logger.info(f"      📰 Sentiment ({sentiment_data['source']}): {sentiment_label} (score: {sentiment_score:.2f})")
+                    if sentiment_data.get('latest_headline'):
+                        self.logger.info(f"         {sentiment_data['latest_headline'][:80]}...")
+                    
+                    if ml_prediction:
+                        self.logger.info(f"      🤖 Local ML: Predicts {ml_direction} ({ml_confidence}% confidence)")
+                    
+                    if gemini_decision != "NEUTRAL":
+                        approval_emoji = "✅" if gemini_approved else "⚠️"
+                        self.logger.info(f"      {approval_emoji} Gemini AI: {gemini_decision} ({gemini_confidence}% confidence)")
+                except Exception as log_err:
+                    # Silently ignore logging errors to prevent disruption
+                    pass
             
             # Composite score using the enhanced formula
             score = 0.0
@@ -481,6 +485,9 @@ class TradingOrchestrator:
             if not is_safe:
                 self.logger.warning(f"Order safety check failed: {warnings}")
                 return
+            
+            # Round size to 4 decimals to match WEEX stepSize requirement
+            size = round(size, 4)
             
             # Execute order
             self.logger.info(f"🎯 Opening {direction} position on {symbol}")

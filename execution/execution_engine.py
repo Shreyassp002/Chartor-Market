@@ -210,6 +210,9 @@ class ExecutionEngine:
         start_time = time.time()
         max_retries = max_retries or self.MAX_RETRIES
         
+        # Round size to 4 decimals to match WEEX stepSize requirement (0.0001)
+        size = round(size, 4)
+        
         # Get expected price before execution
         spread_ok, bid, ask = self.check_spread(symbol)
         expected_price = ask if side == "buy" else bid
