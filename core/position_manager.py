@@ -6,7 +6,7 @@ Handles: Open → Monitor → Stop Loss → Take Profit → Trailing Stop → Cl
 import time
 import threading
 from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import logging
@@ -47,6 +47,14 @@ class Position:
     lowest_price: float
     atr: float
     metadata: Dict
+    # Partial exit tracking
+    initial_size: float = 0.0  # Original position size
+    partial_exits: List[Dict] = field(default_factory=list)  # Track each partial exit
+    profit_levels_hit: List[str] = field(default_factory=list)  # Track which profit levels were hit
+    
+    def __post_init__(self):
+        if self.initial_size == 0.0:
+            self.initial_size = self.size
 
 
 class UnifiedPositionManager:
@@ -67,6 +75,14 @@ class UnifiedPositionManager:
     MONITOR_INTERVAL = 5.0  
     TRAILING_STOP_ACTIVATION_R = 1.0  
     TRAILING_STOP_ATR_MULTIPLIER = 2.0
+    
+    # Partial exit configuration - scale out at profit milestones
+    PARTIAL_EXIT_ENABLED = True
+    PARTIAL_EXIT_LEVELS = [
+        {"r_multiple": 1.0, "exit_pct": 0.25, "label": "1R"},  # Take 25% off at 1R
+        {"r_multiple": 2.0, "exit_pct": 0.25, "label": "2R"},  # Take 25% off at 2R  
+        {"r_multiple": 3.0, "exit_pct": 0.25, "label": "3R"},  # Take 25% off at 3R
+    ]  # Remaining 25% runs with trailing stop
     
     def __init__(self, weex_client: WeexClient, logger: Optional[logging.Logger] = None):
         self.client = weex_client
@@ -240,8 +256,14 @@ class UnifiedPositionManager:
         
         profit_in_r = current_profit / risk_distance
         
-        # Only activate trailing stop after TRAILING_STOP_ACTIVATION_R profit
-        if profit_in_r < self.TRAILING_STOP_ACTIVATION_R:
+        # Activate trailing stop earlier if partial exits were taken (runner position)
+        activation_threshold = self.TRAILING_STOP_ACTIVATION_R
+        if len(pos.profit_levels_hit) > 0:
+            # After taking partials, trail more aggressively on remaining position
+            activation_threshold = 0.5  # Start trailing at 0.5R instead of 1R
+        
+        # Only activate trailing stop after threshold profit
+        if profit_in_r < activation_threshold:
             return
         
         # Calculate new trailing stop
@@ -266,9 +288,87 @@ class UnifiedPositionManager:
                     pos.stop_loss = new_trailing_stop
                     self.logger.info(f"📈 Trailing stop updated for {pos.symbol}: ${new_trailing_stop:.2f}")
     
+    def _execute_partial_exit(self, pos: Position, exit_size: float, level_label: str, profit_r: float):
+        """
+        Execute a partial exit at a profit milestone
+        
+        Args:
+            pos: Position to partially exit
+            exit_size: Size to exit
+            level_label: Label for this profit level (e.g., "1R", "2R")
+            profit_r: Current profit in R-multiples
+        """
+        try:
+            # Round exit size to stepSize
+            # Use same stepSize logic as trading_orchestrator
+            step_sizes = {
+                "cmt_btcusdt": 0.001,
+                "cmt_ethusdt": 0.01,
+                "cmt_solusdt": 0.1,
+                "cmt_dogeusdt": 100,
+                "cmt_xrpusdt": 1,
+                "cmt_adausdt": 10,
+                "cmt_bnbusdt": 0.01,
+                "cmt_ltcusdt": 0.1
+            }
+            step_size = step_sizes.get(pos.symbol, 1)
+            exit_size = (exit_size // step_size) * step_size
+            
+            if exit_size < step_size:
+                self.logger.warning(f"Partial exit size {exit_size} too small for {pos.symbol} (stepSize: {step_size})")
+                return
+            
+            # Execute partial close order
+            close_side = "sell" if pos.direction == "LONG" else "buy"
+            
+            self.logger.info(f"💰 Partial exit at {level_label} ({profit_r:.2f}R): {exit_size} of {pos.size} contracts")
+            
+            result = self.client.place_order(
+                side=close_side,
+                size=str(exit_size),
+                symbol=pos.symbol,
+                order_type="market"
+            )
+            
+            if result and result.get("code") == "00000":
+                # Calculate PnL for this partial
+                if pos.direction == "LONG":
+                    partial_pnl = (pos.current_price - pos.entry_price) * exit_size
+                else:
+                    partial_pnl = (pos.entry_price - pos.current_price) * exit_size
+                
+                # Track partial exit
+                partial_record = {
+                    "timestamp": datetime.now(),
+                    "level": level_label,
+                    "size": exit_size,
+                    "price": pos.current_price,
+                    "pnl": partial_pnl,
+                    "r_multiple": profit_r
+                }
+                pos.partial_exits.append(partial_record)
+                pos.profit_levels_hit.append(level_label)
+                
+                # Reduce position size
+                pos.size -= exit_size
+                
+                self.logger.info(f"✅ Partial exit executed: Locked in ${partial_pnl:.2f} profit")
+                self.logger.info(f"   Remaining position: {pos.size} contracts")
+                
+                # Move stop to breakeven after first profit take
+                if level_label == "1R":
+                    pos.stop_loss = pos.entry_price
+                    self.logger.info(f"🔒 Stop loss moved to breakeven: ${pos.entry_price:.2f}")
+                    
+            else:
+                self.logger.error(f"❌ Partial exit failed: {result}")
+                
+        except Exception as e:
+            self.logger.error(f"Error executing partial exit: {e}", exc_info=True)
+    
     def check_exit_conditions(self, pos: Position) -> Tuple[bool, str]:
         """
-        Check if position should be exited
+        Check if position should be exited (full or partial)
         
         Returns: (should_exit, reason)
         """
@@ -278,11 +378,48 @@ class UnifiedPositionManager:
         elif pos.direction == "SHORT" and pos.current_price >= pos.stop_loss:
             return True, "Stop loss hit"
         
-        # Check take profit
+        # Calculate profit in R-multiples for partial exits
+        risk_distance = abs(pos.entry_price - pos.stop_loss)
+        if risk_distance > 0 and self.PARTIAL_EXIT_ENABLED:
+            if pos.direction == "LONG":
+                profit = pos.current_price - pos.entry_price
+            else:
+                profit = pos.entry_price - pos.current_price
+            
+            profit_r = profit / risk_distance
+            
+            # Check each partial exit level
+            for level in self.PARTIAL_EXIT_LEVELS:
+                level_label = level["label"]
+                if profit_r >= level["r_multiple"] and level_label not in pos.profit_levels_hit:
+                    # Execute partial exit
+                    exit_size = pos.initial_size * level["exit_pct"]
+                    if exit_size > 0 and pos.size >= exit_size:
+                        self._execute_partial_exit(pos, exit_size, level_label, profit_r)
+        
+        # Check full take profit (only after partial exits or if disabled)
         if pos.direction == "LONG" and pos.current_price >= pos.take_profit:
-            return True, "Take profit hit"
+            return True, "Take profit hit (full exit)"
         elif pos.direction == "SHORT" and pos.current_price <= pos.take_profit:
-            return True, "Take profit hit"
+            return True, "Take profit hit (full exit)"
+        
+        # Momentum-based exit: if in profit >2R but retracing >40% from peak
+        if risk_distance > 0:
+            if pos.direction == "LONG":
+                peak_profit = pos.highest_price - pos.entry_price
+                current_profit = pos.current_price - pos.entry_price
+            else:
+                peak_profit = pos.entry_price - pos.lowest_price
+                current_profit = pos.entry_price - pos.current_price
+            
+            peak_r = peak_profit / risk_distance
+            current_r = current_profit / risk_distance
+            
+            # If hit 2R+ but now retraced >40% from peak, exit remaining position
+            if peak_r >= 2.0 and current_profit > 0:
+                retrace_pct = (peak_profit - current_profit) / peak_profit if peak_profit > 0 else 0
+                if retrace_pct > 0.40:  # 40% retrace from peak
+                    return True, f"Momentum exit (retraced {retrace_pct*100:.1f}% from {peak_r:.1f}R peak)"
         
         # Check time stop (24 hours max)
         time_in_position = (datetime.now() - pos.opened_at).total_seconds() / 3600
@@ -366,18 +503,30 @@ class UnifiedPositionManager:
                 self.logger.error(f"Error during position close: {e}", exc_info=True)
                 close_order_id = None
             
+            # Calculate total PnL including partial exits
+            total_pnl = realized_pnl
+            partial_exits_summary = ""
+            if len(pos.partial_exits) > 0:
+                partial_pnl_sum = sum(p["pnl"] for p in pos.partial_exits)
+                total_pnl += partial_pnl_sum
+                partial_exits_summary = f" | Partials: {len(pos.partial_exits)} exits, ${partial_pnl_sum:.2f} locked"
+                self.logger.info(f"   Total PnL with partials: ${total_pnl:.2f} (Final: ${realized_pnl:.2f} + Partials: ${partial_pnl_sum:.2f})")
+            
             # Create trade record
             trade_record = {
                 "symbol": symbol,
                 "side": pos.side,
-                "size": pos.size,
+                "size": pos.initial_size,  # Record original size
+                "final_size": pos.size,  # Size at close (after partials)
                 "price": exit_price,
                 "order_id": close_order_id or pos.order_id,
                 "order_type": "market",
                 "status": "filled",
-                "pnl": realized_pnl,
+                "pnl": total_pnl,  # Total PnL including partials
+                "final_exit_pnl": realized_pnl,  # PnL from final exit only
+                "partial_exits": pos.partial_exits,
                 "fees": 0.0,  # Calculate if available
-                "notes": f"{reason} | {pos.source} | Entry: {pos.entry_price:.2f} | Hold: {hold_time:.1f}h"
+                "notes": f"{reason} | {pos.source} | Entry: {pos.entry_price:.2f} | Hold: {hold_time:.1f}h{partial_exits_summary}"
             }
             
             # Save to database

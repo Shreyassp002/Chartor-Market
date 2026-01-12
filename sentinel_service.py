@@ -48,7 +48,7 @@ while True:
         
         # STEP 1: Fetch Data (From Binance for stability)
         print("1️⃣ Fetching Market Data...")
-        candles = client.fetch_candles(symbol=TRADING_SYMBOL, limit=100)
+        candles = client.fetch_candles(symbol=TRADING_SYMBOL, limit=500)
         
         if len(candles) > 20:
             # STEP 2: Technical Analysis (RSI, EMA)

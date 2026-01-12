@@ -95,12 +95,32 @@ class WeexClient:
         try:
             if method == "GET":
                 full_url = url + query_string if query_string else url
-                res = requests.get(full_url, headers=headers, timeout=5)
+                res = requests.get(full_url, headers=headers, timeout=10)
             else:
-                res = requests.post(url, headers=headers, data=body_str, timeout=5)
+                res = requests.post(url, headers=headers, data=body_str, timeout=10)
             
-            if res.status_code != 200:
-                logger.error(f"WEEX API Error {res.status_code}: {res.text[:200] if res.text else 'No response body'}")
+            # Handle specific HTTP status codes
+            if res.status_code == 521:
+                logger.error(f"WEEX API Error 521: Server is down or unreachable")
+                logger.error(f"This usually means WEEX servers are having issues. Try again in a few minutes.")
+                return None
+            elif res.status_code == 429:
+                logger.error(f"WEEX API Error 429: Rate limit exceeded - too many requests")
+                return None
+            elif res.status_code not in [200, 201]:
+                error_msg = res.text[:200] if res.text else 'No response body'
+                logger.error(f"WEEX API Error {res.status_code}: {error_msg}")
+                
+                # Try to parse error JSON
+                try:
+                    error_data = res.json()
+                    if isinstance(error_data, dict):
+                        error_code = error_data.get('code', 'unknown')
+                        error_msg = error_data.get('msg', error_msg)
+                        logger.error(f"WEEX Error Code: {error_code}, Message: {error_msg}")
+                except:
+                    pass
+                    
                 return None
             
             if not res.text or res.text.strip() == "":
@@ -114,10 +134,12 @@ class WeexClient:
                 logger.error(f"JSON Parse Error: {e}")
                 return None
         except requests.exceptions.Timeout:
-            logger.error(f"WEEX API Error: Request timeout (5s)")
+            logger.error(f"WEEX API Error: Request timeout (10s)")
+            logger.error(f"Endpoint: {endpoint}")
             return None
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"WEEX API Error: Connection failed - {str(e)[:200]}")
+            logger.error(f"WEEX API Error: Connection failed - Network issue or WEEX is down")
+            logger.error(f"Details: {str(e)[:200]}")
             return None
         except Exception as e:
             logger.error(f"WEEX API Error: {type(e).__name__} - {str(e)[:200]}")

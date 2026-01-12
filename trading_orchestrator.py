@@ -92,13 +92,13 @@ class TradingOrchestrator:
         self.logger.info(f"   Enabled symbols: {len(self.ENABLED_SYMBOLS)}")
         self.logger.info(f"   Initial equity: ${initial_equity:,.2f}")
     
-    def fetch_market_data(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
-        """Fetch and prepare market data for a symbol"""
+    def fetch_market_data(self, symbol: str, limit: int = 500) -> Optional[pd.DataFrame]:
+        """Fetch and prepare market data for a symbol (default 500 candles for better analysis)"""
         try:
             self.logger.info(f"      📡 Fetching {limit} candles for {symbol}...")
             candles = self.client.fetch_candles(symbol=symbol, limit=limit)
             
-            if not candles or len(candles) < 50:
+            if not candles or len(candles) < 100:
                 self.logger.warning(f"Insufficient data for {symbol}: got {len(candles) if candles else 0} candles")
                 return None
             
@@ -165,9 +165,9 @@ class TradingOrchestrator:
         Score = 0.20×Tech + 0.15×Momentum + 0.12×Vol + 0.10×Funding + 0.08×OBI + 0.15×Sentiment + 0.15×ML + 0.10×Gemini - 0.05×Risk
         """
         try:
-            # Fetch market data
+            # Fetch market data (500 candles for comprehensive analysis)
             df = self.fetch_market_data(symbol)
-            if df is None or len(df) < 50:
+            if df is None or len(df) < 100:
                 return None
             
             # Train local ML model on latest data
