@@ -396,6 +396,19 @@ class WeexClient:
         res = self._send_weex_request("GET", endpoint, params if params else None)
         return res
     
+    def get_order_detail(self, order_id, symbol):
+        """
+        Gets order details by order_id (convenience method)
+        
+        Args:
+            order_id: Order ID to query
+            symbol: Trading pair
+        
+        Returns:
+            Order details response from WEEX
+        """
+        return self.get_current_orders(symbol=symbol, order_id=order_id, limit=1)
+    
     def get_history_orders(self, symbol=None, page_size=100, create_date=None, end_create_date=None):
         """
         Gets history orders using /capi/v2/order/history endpoint

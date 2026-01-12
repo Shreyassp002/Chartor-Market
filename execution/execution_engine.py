@@ -261,14 +261,32 @@ class ExecutionEngine:
                 
                 # Successful execution
                 order_data = response.get("data", {})
-                order_id = order_data.get("orderId", "unknown")
+                order_id = order_data.get("order_id", order_data.get("orderId", "unknown"))
                 
-                filled_price = float(order_data.get("fillPrice", expected_price))
-                filled_size = float(order_data.get("fillSize", size))
-                fees = float(order_data.get("fee", 0.0))
+                # Query order details to get fill information
+                try:
+                    order_details = self.client.get_order_detail(order_id, symbol)
+                    if order_details and order_details.get("code") == "00000":
+                        detail_data = order_details.get("data", {})
+                        filled_price = float(detail_data.get("average_price", detail_data.get("price", expected_price)))
+                        filled_size = float(detail_data.get("size", size))
+                        fees = float(detail_data.get("fee", 0.0))
+                    else:
+                        # Fallback if order details not available
+                        filled_price = expected_price
+                        filled_size = size
+                        fees = 0.0
+                except Exception as detail_err:
+                    self.logger.warning(f"Could not fetch order details: {detail_err}")
+                    filled_price = expected_price
+                    filled_size = size
+                    fees = 0.0
                 
-                # Calculate slippage
-                slippage = abs(filled_price - expected_price) / expected_price
+                # Calculate slippage (handle zero expected_price)
+                if expected_price > 0:
+                    slippage = abs(filled_price - expected_price) / expected_price
+                else:
+                    slippage = 0.0
                 
                 # Determine status
                 if filled_size >= size * 0.99:  
