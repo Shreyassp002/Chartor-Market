@@ -18,11 +18,18 @@ from core.position_manager import initialize_position_manager, get_position_mana
 from core.sentiment_live import get_sentiment_feed, get_real_time_sentiment
 from core.safety_layer import ExecutionSafetyLayer
 import logging
+import sys
+import io
+from datetime import datetime
 
-# Configure logging
+# Configure logging with file handler
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')),
+        logging.FileHandler(f'api_server_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
+    ]
 )
 logger = logging.getLogger(__name__)
 

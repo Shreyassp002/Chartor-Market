@@ -458,8 +458,21 @@ class TradingOrchestrator:
                 self.logger.error(f"Cannot open position - no data for {symbol}")
                 return
             
+            # Get CURRENT WEEX PRICE (not Binance historical close)
+            weex_price = self.execution_engine.get_current_price(symbol)
+            if weex_price <= 0:
+                self.logger.error(f"Cannot get current WEEX price for {symbol}")
+                return
+            
+            entry_price = weex_price
+            
+            # Log if there's a price difference between Binance and WEEX
             last = df.iloc[-1]
-            entry_price = last['close']
+            binance_price = last['close']
+            price_diff_pct = abs(weex_price - binance_price) / binance_price * 100
+            if price_diff_pct > 0.5:
+                self.logger.warning(f"⚠️ Price difference: Binance ${binance_price:.2f} vs WEEX ${weex_price:.2f} ({price_diff_pct:.2f}%)")
+            
             atr = signal_result.metadata.get("atr_pct", 1.0) * entry_price / 100
             
             # Use signal's stop loss and take profit
@@ -678,10 +691,15 @@ class TradingOrchestrator:
             # Manage open positions
             if portfolio_risk.open_positions > 0:
                 for symbol in list(self.risk_manager.positions.keys()):
+                    # Get current WEEX price for position management
+                    current_price = self.execution_engine.get_current_price(symbol)
+                    if current_price <= 0:
+                        self.logger.warning(f"Cannot get WEEX price for {symbol}, skipping position management")
+                        continue
+                    
                     df = self.fetch_market_data(symbol)
                     if df is not None:
                         last = df.iloc[-1]
-                        current_price = last['close']
                         
                         # Calculate ATR
                         if 'atr' in df.columns:
@@ -693,7 +711,7 @@ class TradingOrchestrator:
             
             # If flat and can trade, look for new opportunity
             if portfolio_risk.open_positions == 0 and portfolio_risk.can_trade:
-                self.logger.info("🔍 Scanning for opportunities...")
+                self.logger.info("🔍 Scanning for opportunities (using WEEX live prices)...")
                 
                 best_opportunity = self.select_best_opportunity()
                 
@@ -734,9 +752,10 @@ class TradingOrchestrator:
             
             # Close any open positions
             for symbol in list(self.risk_manager.positions.keys()):
-                df = self.fetch_market_data(symbol)
-                if df is not None:
-                    current_price = df['close'].iloc[-1]
+                current_price = self.execution_engine.get_current_price(symbol)
+                if current_price > 0:
                     self.close_position(symbol, current_price, "System shutdown")
+                else:
+                    self.logger.error(f"Cannot get WEEX price to close {symbol}")
             
             self.logger.info("✅ Shutdown complete")

@@ -84,6 +84,43 @@ class ExecutionEngine:
         self.total_slippage = 0.0
         self.total_fees = 0.0
     
+    def get_current_price(self, symbol: str) -> float:
+        """
+        Get current market price from WEEX orderbook
+        
+        Returns: Mid price (average of best bid and ask)
+        """
+        try:
+            # Check if client has orderbook method
+            if not hasattr(self.client, 'get_orderbook'):
+                self.logger.warning(f"Cannot get WEEX price - orderbook method not available")
+                return 0.0
+            
+            # Get orderbook from WEEX
+            orderbook = self.client.get_orderbook(symbol)
+            
+            if not orderbook or "bids" not in orderbook or "asks" not in orderbook:
+                self.logger.warning(f"No orderbook data for {symbol}")
+                return 0.0
+            
+            bids = orderbook["bids"]
+            asks = orderbook["asks"]
+            
+            if not bids or not asks:
+                return 0.0
+            
+            best_bid = float(bids[0][0])
+            best_ask = float(asks[0][0])
+            
+            # Return mid price
+            mid_price = (best_bid + best_ask) / 2.0
+            
+            return mid_price
+            
+        except Exception as e:
+            self.logger.error(f"Error getting current price: {e}")
+            return 0.0
+    
     def check_spread(self, symbol: str) -> Tuple[bool, float, float]:
         """
         Check bid-ask spread before execution
@@ -264,23 +301,62 @@ class ExecutionEngine:
                 order_id = order_data.get("order_id", order_data.get("orderId", "unknown"))
                 
                 # Query order details to get fill information
-                try:
-                    order_details = self.client.get_order_detail(order_id, symbol)
-                    if order_details and order_details.get("code") == "00000":
-                        detail_data = order_details.get("data", {})
-                        filled_price = float(detail_data.get("average_price", detail_data.get("price", expected_price)))
-                        filled_size = float(detail_data.get("size", size))
-                        fees = float(detail_data.get("fee", 0.0))
-                    else:
-                        # Fallback if order details not available
-                        filled_price = expected_price
-                        filled_size = size
-                        fees = 0.0
-                except Exception as detail_err:
-                    self.logger.warning(f"Could not fetch order details: {detail_err}")
+                # Try multiple times with delays since order may take time to fill
+                filled_price = expected_price
+                filled_size = size
+                fees = 0.0
+                
+                import time
+                max_retries = 5
+                retry_delay = 0.5  # 500ms between retries
+                
+                for attempt in range(max_retries):
+                    try:
+                        # Small delay to let order fill
+                        if attempt > 0:
+                            time.sleep(retry_delay)
+                        
+                        # Try current orders first (for pending/filling orders)
+                        order_details = self.client.get_current_orders(symbol=symbol, order_id=order_id, limit=1)
+                        
+                        if order_details and order_details.get("code") == "00000":
+                            data_list = order_details.get("data", {}).get("resultList", [])
+                            if data_list and len(data_list) > 0:
+                                detail_data = data_list[0]
+                                avg_price = detail_data.get("averagePrice", detail_data.get("average_price"))
+                                if avg_price and float(avg_price) > 0:
+                                    filled_price = float(avg_price)
+                                    filled_size = float(detail_data.get("size", detail_data.get("executedQty", size)))
+                                    fees = float(detail_data.get("fee", 0.0))
+                                    self.logger.info(f"Retrieved fill price from current orders: {filled_price}")
+                                    break  # Success!
+                        
+                        # If not in current orders, try history (for completed orders)
+                        if attempt >= 2:  # Start checking history after 2nd attempt
+                            history = self.client.get_history_orders(symbol=symbol, page_size=10)
+                            if history and history.get("code") == "00000":
+                                orders = history.get("data", [])
+                                for hist_order in orders:
+                                    if str(hist_order.get("orderId")) == str(order_id):
+                                        avg_price = hist_order.get("averagePrice", hist_order.get("average_price"))
+                                        if avg_price and float(avg_price) > 0:
+                                            filled_price = float(avg_price)
+                                            filled_size = float(hist_order.get("size", hist_order.get("executedQty", size)))
+                                            fees = float(hist_order.get("fee", 0.0))
+                                            self.logger.info(f"Retrieved fill price from history: {filled_price}")
+                                            break
+                                if filled_price != expected_price:
+                                    break  # Found in history
+                    
+                    except Exception as detail_err:
+                        if attempt == max_retries - 1:  # Last attempt
+                            self.logger.warning(f"Could not fetch order details after {max_retries} attempts: {detail_err}")
+                        continue
+                
+                # Final validation - never use 0 price
+                if filled_price == 0.0 and expected_price > 0:
                     filled_price = expected_price
-                    filled_size = size
-                    fees = 0.0
+                    self.logger.warning(f"Using expected_price {expected_price} since fill price was 0.0")
                 
                 # Calculate slippage (handle zero expected_price)
                 if expected_price > 0:

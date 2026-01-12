@@ -15,17 +15,18 @@ def main(skip_confirmation: bool = False):
         skip_confirmation: Skip interactive confirmation (for API/background mode)
     """
     
-    # Setup logging with UTF-8 encoding for Windows emoji support
-    import io
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')),
-            logging.FileHandler(f'trading_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
-        ]
-    )
+    # Only setup logging if it hasn't been configured yet (e.g., running standalone)
+    if not logging.getLogger().hasHandlers():
+        import io
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')),
+                logging.FileHandler(f'trading_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8')
+            ]
+        )
     
     logger = logging.getLogger("InstitutionalTrading")
     
@@ -47,21 +48,27 @@ def main(skip_confirmation: bool = False):
         logger.info("Fetching account balance...")
         try:
             balance_data = client.get_balance()
-            if balance_data and 'data' in balance_data and len(balance_data['data']) > 0:
+            logger.info(f"Balance API response: {balance_data}")
+            
+            if balance_data and balance_data.get('code') == '00000' and 'data' in balance_data:
                 # Get USDT balance (available_balance is what we can use for new positions)
-                usdt_balance = next((item for item in balance_data['data'] if item['coin_name'] == 'USDT'), None)
+                usdt_balance = next((item for item in balance_data['data'] if item.get('coin_name') == 'USDT'), None)
                 if usdt_balance:
                     available_balance = float(usdt_balance.get('available_balance', 0))
-                    INITIAL_EQUITY = available_balance
-                    logger.info(f"✅ Real account balance: ${INITIAL_EQUITY:.2f} USDT")
+                    if available_balance > 0:
+                        INITIAL_EQUITY = available_balance
+                        logger.info(f"✅ Real account balance: ${INITIAL_EQUITY:.2f} USDT")
+                    else:
+                        logger.warning("Available balance is 0, using fallback")
+                        INITIAL_EQUITY = 1000.0
                 else:
-                    logger.warning("USDT balance not found, using fallback")
+                    logger.warning("USDT balance not found in response, using fallback")
                     INITIAL_EQUITY = 1000.0  # Conservative fallback
             else:
-                logger.warning("Could not fetch balance, using fallback")
+                logger.warning(f"Could not fetch balance (code: {balance_data.get('code') if balance_data else 'None'}), using fallback")
                 INITIAL_EQUITY = 1000.0  # Conservative fallback
         except Exception as balance_err:
-            logger.error(f"Balance fetch error: {balance_err}")
+            logger.error(f"Balance fetch error: {balance_err}", exc_info=True)
             INITIAL_EQUITY = 1000.0  # Conservative fallback
         
         logger.info(f"Configuration:")
