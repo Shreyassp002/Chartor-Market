@@ -470,6 +470,49 @@ class WeexClient:
         logger.info(f"WEEX AI Log Upload Response: {res}")
         return res
     
+    def get_orderbook(self, symbol="cmt_btcusdt", limit=20):
+        """
+        Get orderbook depth (bid/ask prices and volumes)
+        Uses /api/mix/v1/market/depth endpoint
+        
+        Args:
+            symbol: Trading pair (e.g., 'cmt_btcusdt')
+            limit: Depth limit (5, 10, 20, 50, 100)
+        
+        Returns:
+            {
+                "bids": [[price, size], ...],  # Buy orders (highest first)
+                "asks": [[price, size], ...]   # Sell orders (lowest first)
+            }
+        """
+        endpoint = "/api/mix/v1/market/depth"
+        params = {
+            "symbol": symbol,
+            "limit": str(limit)
+        }
+        
+        try:
+            # This is a public endpoint, so we'll make an unauthenticated request
+            url = f"{self.base_url}{endpoint}"
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            full_url = f"{url}?{query_string}"
+            
+            response = requests.get(full_url, timeout=5)
+            data = response.json()
+            
+            if isinstance(data, dict) and data.get("code") == "00000" and "data" in data:
+                orderbook_data = data["data"]
+                return {
+                    "bids": orderbook_data.get("bids", []),
+                    "asks": orderbook_data.get("asks", [])
+                }
+            else:
+                logger.warning(f"Orderbook API returned: {data}")
+                return {"bids": [], "asks": []}
+        except Exception as e:
+            logger.error(f"Error fetching orderbook: {e}")
+            return {"bids": [], "asks": []}
+    
     def close_all_positions(self):
         """Closes all open positions."""
         try:

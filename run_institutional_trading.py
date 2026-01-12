@@ -50,26 +50,45 @@ def main(skip_confirmation: bool = False):
             balance_data = client.get_balance()
             logger.info(f"Balance API response: {balance_data}")
             
-            if balance_data and balance_data.get('code') == '00000' and 'data' in balance_data:
-                # Get USDT balance (available_balance is what we can use for new positions)
-                usdt_balance = next((item for item in balance_data['data'] if item.get('coin_name') == 'USDT'), None)
+            # WEEX can return either a dict with 'code' and 'data' OR a list directly
+            balance_list = None
+            if isinstance(balance_data, list):
+                balance_list = balance_data
+            elif isinstance(balance_data, dict) and balance_data.get('code') == '00000' and 'data' in balance_data:
+                balance_list = balance_data['data']
+            
+            if balance_list:
+                # Find USDT balance (look for 'coinName' or 'coin_name')
+                usdt_balance = None
+                for item in balance_list:
+                    coin = item.get('coinName') or item.get('coin_name')
+                    if coin == 'USDT':
+                        usdt_balance = item
+                        break
+                
                 if usdt_balance:
-                    available_balance = float(usdt_balance.get('available_balance', 0))
-                    if available_balance > 0:
-                        INITIAL_EQUITY = available_balance
-                        logger.info(f"✅ Real account balance: ${INITIAL_EQUITY:.2f} USDT")
+                    # Get available balance (try multiple field names)
+                    available = usdt_balance.get('available') or usdt_balance.get('available_balance') or usdt_balance.get('availableBalance')
+                    if available:
+                        available_balance = float(available)
+                        if available_balance > 0:
+                            INITIAL_EQUITY = available_balance
+                            logger.info(f"✅ Real account balance: ${INITIAL_EQUITY:.2f} USDT")
+                        else:
+                            logger.warning("Available balance is 0, using fallback")
+                            INITIAL_EQUITY = 1000.0
                     else:
-                        logger.warning("Available balance is 0, using fallback")
+                        logger.warning("Available field not found, using fallback")
                         INITIAL_EQUITY = 1000.0
                 else:
                     logger.warning("USDT balance not found in response, using fallback")
-                    INITIAL_EQUITY = 1000.0  # Conservative fallback
+                    INITIAL_EQUITY = 1000.0
             else:
-                logger.warning(f"Could not fetch balance (code: {balance_data.get('code') if balance_data else 'None'}), using fallback")
-                INITIAL_EQUITY = 1000.0  # Conservative fallback
+                logger.warning(f"Could not parse balance response, using fallback")
+                INITIAL_EQUITY = 1000.0
         except Exception as balance_err:
-            logger.error(f"Balance fetch error: {balance_err}", exc_info=True)
-            INITIAL_EQUITY = 1000.0  # Conservative fallback
+            logger.error(f"Balance fetch error: {balance_err}")
+            INITIAL_EQUITY = 1000.0
         
         logger.info(f"Configuration:")
         logger.info(f"  Initial Equity: ${INITIAL_EQUITY:,.2f}")
