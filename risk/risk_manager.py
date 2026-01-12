@@ -8,7 +8,10 @@ from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
+import logging
 
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 class PositionState(Enum):
     """Position lifecycle states"""
