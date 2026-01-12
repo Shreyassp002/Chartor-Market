@@ -294,7 +294,12 @@ class ExecutionEngine:
                 
                 # Successful execution
                 order_data = response.get("data", {})
-                order_id = order_data.get("order_id", order_data.get("orderId", "unknown"))
+                
+                # Extract order ID - WEEX uses snake_case in response
+                order_id = order_data.get("order_id") or response.get("order_id") or order_data.get("orderId") or "unknown"
+                
+                # Log the order ID for debugging
+                self.logger.info(f"Order placed successfully. Order ID: {order_id}")
                 
                 # Query order details to get fill information
                 # Try multiple times with delays since order may take time to fill
@@ -311,20 +316,30 @@ class ExecutionEngine:
                         if detail_attempt > 0:
                             time.sleep(retry_delay)
                         
-                        # Try current orders first (for pending/filling orders)
-                        order_details = self.client.get_current_orders(symbol=symbol, order_id=order_id, limit=1)
+                        # Use ticker to get current price as fallback for fill price
+                        if hasattr(self.client, 'get_ticker'):
+                            ticker = self.client.get_ticker(symbol)
+                            if ticker and "last" in ticker:
+                                filled_price = float(ticker["last"])
+                                self.logger.info(f"Using ticker price as fill price: ${filled_price:.4f}")
+                                break
                         
-                        if order_details and order_details.get("code") == "00000":
-                            data_list = order_details.get("data", {}).get("resultList", [])
-                            if data_list and len(data_list) > 0:
-                                detail_data = data_list[0]
-                                avg_price = detail_data.get("averagePrice", detail_data.get("average_price"))
-                                if avg_price and float(avg_price) > 0:
-                                    filled_price = float(avg_price)
-                                    filled_size = float(detail_data.get("size", detail_data.get("executedQty", size)))
-                                    fees = float(detail_data.get("fee", 0.0))
-                                    self.logger.info(f"Retrieved fill price from current orders: {filled_price}")
-                                    break  # Success!
+                        # If we have a valid order ID (not "unknown"), try to fetch details
+                        if order_id != "unknown":
+                            # Try current orders first (for pending/filling orders)
+                            order_details = self.client.get_current_orders(symbol=symbol, order_id=order_id, limit=1)
+                            
+                            if order_details and order_details.get("code") == "00000":
+                                data_list = order_details.get("data", {}).get("resultList", [])
+                                if data_list and len(data_list) > 0:
+                                    detail_data = data_list[0]
+                                    avg_price = detail_data.get("averagePrice", detail_data.get("average_price"))
+                                    if avg_price and float(avg_price) > 0:
+                                        filled_price = float(avg_price)
+                                        filled_size = float(detail_data.get("size", detail_data.get("executedQty", size)))
+                                        fees = float(detail_data.get("fee", 0.0))
+                                        self.logger.info(f"Retrieved fill price from current orders: {filled_price}")
+                                        break  # Success!
                         
                         # If not in current orders, try history (for completed orders)
                         if detail_attempt >= 2:  # Start checking history after 2nd attempt
