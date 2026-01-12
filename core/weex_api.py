@@ -7,9 +7,12 @@ import json
 import os
 import random
 import urllib.parse
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class WeexClient:
     def __init__(self, api_key=None, secret_key=None, passphrase=None):
@@ -97,27 +100,27 @@ class WeexClient:
                 res = requests.post(url, headers=headers, data=body_str, timeout=5)
             
             if res.status_code != 200:
-                print(f"WEEX API Error {res.status_code}: {res.text[:200] if res.text else 'No response body'}")
+                logger.error(f"WEEX API Error {res.status_code}: {res.text[:200] if res.text else 'No response body'}")
                 return None
             
             if not res.text or res.text.strip() == "":
-                print(f"WEEX API Error: Empty response from server (status {res.status_code})")
+                logger.error(f"WEEX API Error: Empty response from server (status {res.status_code})")
                 return None
             
             try:
                 return res.json()
             except json.JSONDecodeError as e:
-                print(f"WEEX API Error: Invalid JSON response - {res.text[:200]}")
-                print(f"JSON Parse Error: {e}")
+                logger.error(f"WEEX API Error: Invalid JSON response - {res.text[:200]}")
+                logger.error(f"JSON Parse Error: {e}")
                 return None
         except requests.exceptions.Timeout:
-            print(f"WEEX API Error: Request timeout (5s)")
+            logger.error(f"WEEX API Error: Request timeout (5s)")
             return None
         except requests.exceptions.ConnectionError as e:
-            print(f"WEEX API Error: Connection failed - {str(e)[:200]}")
+            logger.error(f"WEEX API Error: Connection failed - {str(e)[:200]}")
             return None
         except Exception as e:
-            print(f"WEEX API Error: {type(e).__name__} - {str(e)[:200]}")
+            logger.error(f"WEEX API Error: {type(e).__name__} - {str(e)[:200]}")
             return None
 
     def fetch_candles(self, symbol="cmt_btcusdt", limit=100, interval="15m"):
@@ -144,9 +147,9 @@ class WeexClient:
                 return data
                 
         except Exception as e:
-            print(f"Binance Fetch Error: {e}")
+            logger.warning(f"Binance Fetch Error: {e}")
 
-        print("Network Blocked. Using Simulation Data.")
+        logger.info("Network Blocked. Using Simulation Data.")
         return self._generate_mock_candles(limit)
 
     def place_order(self, side="buy", size="10", symbol="cmt_ethusdt", order_type="market", price=None, 
@@ -201,26 +204,26 @@ class WeexClient:
         if preset_stop_loss:
             params["presetStopLossPrice"] = str(preset_stop_loss)
         
-        print(f"Sending Order to WEEX: {params}")
+        logger.info(f"Sending Order to WEEX: {params}")
         
         res = self._send_weex_request("POST", endpoint, params)
         
-        print(f"WEEX Response: {res}")
+        logger.info(f"WEEX Response: {res}")
         
         if res:
             if isinstance(res, dict):
                 if res.get("code") == "00000" or res.get("status") == "success" or res.get("order_id"):
-                    print(f"WEEX ORDER SUCCESS: {res}")
+                    logger.info(f"WEEX ORDER SUCCESS: {res}")
                     if "code" not in res:
                         res["code"] = "00000"
                     return res
                 else:
-                    print(f"WEEX API Error: {res.get('msg', res.get('message', 'Unknown error'))}")
+                    logger.error(f"WEEX API Error: {res.get('msg', res.get('message', 'Unknown error'))}")
                     return res
             else:
                 return res
         else:
-            print(f"No response from WEEX API")
+            logger.error(f"No response from WEEX API")
             return {"code": "ERROR", "msg": "No response from WEEX", "data": None}
 
     def execute_order(self, side, size="10", symbol="cmt_dogeusdt"):
@@ -245,9 +248,9 @@ class WeexClient:
         if symbol:
             params["symbol"] = symbol
         
-        print(f"Cancelling Order on WEEX: {params}")
+        logger.info(f"Cancelling Order on WEEX: {params}")
         res = self._send_weex_request("POST", endpoint, params)
-        print(f"WEEX Cancel Order Response: {res}")
+        logger.info(f"WEEX Cancel Order Response: {res}")
         return res
     
     def batch_orders(self, symbol, order_data_list, margin_mode=1):
@@ -271,9 +274,9 @@ class WeexClient:
             "orderDataList": order_data_list
         }
         
-        print(f"Sending Batch Orders to WEEX: {len(order_data_list)} orders")
+        logger.info(f"Sending Batch Orders to WEEX: {len(order_data_list)} orders")
         res = self._send_weex_request("POST", endpoint, params)
-        print(f"WEEX Batch Orders Response: {res}")
+        logger.info(f"WEEX Batch Orders Response: {res}")
         return res
     
     def close_position(self, symbol, side, size=None):
@@ -449,9 +452,9 @@ class WeexClient:
         if order_id:
             params["orderId"] = order_id
         
-        print(f"Uploading AI Log to WEEX: Stage={stage}, Model={model}")
+        logger.info(f"Uploading AI Log to WEEX: Stage={stage}, Model={model}")
         res = self._send_weex_request("POST", endpoint, params)
-        print(f"WEEX AI Log Upload Response: {res}")
+        logger.info(f"WEEX AI Log Upload Response: {res}")
         return res
     
     def close_all_positions(self):

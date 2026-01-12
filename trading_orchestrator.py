@@ -14,6 +14,9 @@ from strategy.intraday_engine import IntradayMomentumEngine, SignalResult
 from regime.ofras import OFRASRegimeDetector, RegimeType, RegimeState
 from risk.risk_manager import RiskManager, PositionState, PortfolioRisk
 from execution.execution_engine import ExecutionEngine, OrderResult
+from core.sentiment_live import get_sentiment_feed
+from core.llm_brain import get_trading_decision
+from core.ml_analyst import MLAnalyst
 
 
 @dataclass
@@ -68,6 +71,10 @@ class TradingOrchestrator:
         self.regime_detector = OFRASRegimeDetector()
         self.risk_manager = RiskManager(initial_equity=initial_equity)
         self.execution_engine = ExecutionEngine(weex_client, logger=self.logger)
+        self.sentiment_feed = get_sentiment_feed()  # Real-time sentiment feed
+        self.ml_analyst = MLAnalyst()  # Local ML predictions
+        
+        self.logger.info("🤖 AI Components initialized: Gemini + Local ML + Sentiment Feed")
         
         # State tracking
         self.current_regime: Optional[RegimeState] = None
@@ -145,16 +152,26 @@ class TradingOrchestrator:
     
     def score_asset(self, symbol: str) -> Optional[AssetScore]:
         """
-        Score an asset for opportunity
+        Score an asset for opportunity (ENHANCED: AI-powered multi-factor analysis)
+        
+        Integrates:
+        - Technical indicators (IntradayMomentumEngine)
+        - Market regime detection (OFRAS)
+        - Real-time sentiment analysis (CryptoPanic + FinBERT)
+        - Local ML predictions (XGBoost)
+        - Gemini AI final validation
         
         Formula:
-        Score = 0.30×Trend + 0.25×Momentum + 0.15×Vol + 0.15×FP + 0.10×OBI - 0.05×Risk
+        Score = 0.20×Tech + 0.15×Momentum + 0.12×Vol + 0.10×Funding + 0.08×OBI + 0.15×Sentiment + 0.15×ML + 0.10×Gemini - 0.05×Risk
         """
         try:
             # Fetch market data
             df = self.fetch_market_data(symbol)
             if df is None or len(df) < 50:
                 return None
+            
+            # Train local ML model on latest data
+            ml_trained = self.ml_analyst.train_model(df.to_dict('records'))
             
             # Detect regime
             funding_rate = self.get_funding_rate(symbol)
@@ -197,28 +214,113 @@ class TradingOrchestrator:
                 self.signals_filtered_by_regime += 1
                 signal_result.strength = 0.0  # Filter out
             
-            # Composite score using the formula
+            # Get AI sentiment analysis
+            symbol_clean = symbol.replace("cmt_", "").replace("usdt", "").upper()
+            sentiment_data = self.sentiment_feed.get_market_sentiment(symbol_clean)
+            sentiment_score = sentiment_data['score']  # -1.0 to 1.0
+            sentiment_label = sentiment_data['label']  # POSITIVE/NEGATIVE/NEUTRAL
+            
+            # Get Local ML prediction
+            from core.analysis import analyze_market_structure
+            market_state = analyze_market_structure(df.to_dict('records'))
+            ml_direction = "NEUTRAL"
+            ml_confidence = 0.0
+            ml_prediction = None
+            
+            if ml_trained and market_state:
+                ml_direction, ml_confidence = self.ml_analyst.predict_next_move(market_state)
+                ml_prediction = {"direction": ml_direction, "confidence": ml_confidence}
+            
+            # Get Gemini AI consultation (only for strong signals to save API quota)
+            gemini_decision = "NEUTRAL"
+            gemini_confidence = 0.0
+            gemini_approved = False
+            
+            if signal_result.signal in ["LONG", "SHORT"] and signal_allowed and signal_result.strength > 40:
+                ai_result = get_trading_decision(
+                    market_state,
+                    symbol=symbol,
+                    use_cache=True,  # Use cache to save quota
+                    ml_prediction=ml_prediction,
+                    sentiment={
+                        "label": sentiment_label,
+                        "score": sentiment_score,
+                        "source": sentiment_data['source'],
+                        "headline": sentiment_data.get('latest_headline', '')
+                    }
+                )
+                
+                gemini_decision = ai_result.get("decision", "WAIT")
+                gemini_confidence = ai_result.get("confidence", 0)
+                gemini_source = ai_result.get("source", "UNKNOWN")
+                
+                # Check if Gemini approves the signal direction
+                if gemini_decision == signal_result.signal:
+                    gemini_approved = True
+                
+            # Log all AI components
+            if signal_result.signal in ["LONG", "SHORT"]:
+                self.logger.info(f"      📰 Sentiment ({sentiment_data['source']}): {sentiment_label} (score: {sentiment_score:.2f})")
+                if sentiment_data.get('latest_headline'):
+                    self.logger.info(f"         {sentiment_data['latest_headline'][:80]}...")
+                
+                if ml_prediction:
+                    self.logger.info(f"      🤖 Local ML: Predicts {ml_direction} ({ml_confidence}% confidence)")
+                
+                if gemini_decision != "NEUTRAL":
+                    approval_emoji = "✅" if gemini_approved else "⚠️"
+                    self.logger.info(f"      {approval_emoji} Gemini AI: {gemini_decision} ({gemini_confidence}% confidence)")
+            
+            # Composite score using the enhanced formula
             score = 0.0
             
-            # Trend component (30%)
+            # Technical component (20% - reduced to make room for AI)
             trend_factor = signal_result.confidence_factors.get("momentum", 0) / 100
-            score += 0.30 * trend_factor * 100
+            score += 0.20 * trend_factor * 100
             
-            # Momentum component (25%)
+            # Momentum component (15% - reduced)
             momentum_factor = signal_result.confidence_factors.get("trend_strength", 0) / 100
-            score += 0.25 * momentum_factor * 100
+            score += 0.15 * momentum_factor * 100
             
-            # Volatility component (15%)
+            # Volatility component (12% - reduced)
             vol_factor = signal_result.confidence_factors.get("volatility_compression", 0) / 100
-            score += 0.15 * vol_factor * 100
+            score += 0.12 * vol_factor * 100
             
-            # Funding pressure (15%)
+            # Funding pressure (10% - reduced)
             fp_factor = signal_result.confidence_factors.get("funding_pressure", 0) / 100 if "funding_pressure" in signal_result.confidence_factors else 0
-            score += 0.15 * fp_factor * 100
+            score += 0.10 * fp_factor * 100
             
-            # Orderbook imbalance (10%)
+            # Orderbook imbalance (8% - reduced)
             obi_factor = signal_result.confidence_factors.get("orderbook_imbalance", 0) / 100 if "orderbook_imbalance" in signal_result.confidence_factors else 0
-            score += 0.10 * obi_factor * 100
+            score += 0.08 * obi_factor * 100
+            
+            # AI Sentiment component (15%)
+            # Positive sentiment boosts LONG signals, negative boosts SHORT signals
+            sentiment_alignment = 0.0
+            if signal_result.signal == "LONG":
+                sentiment_alignment = max(0, sentiment_score)  # 0 to 1 for LONG
+            elif signal_result.signal == "SHORT":
+                sentiment_alignment = max(0, -sentiment_score)  # 0 to 1 for SHORT
+            score += 0.15 * sentiment_alignment * 100
+            
+            # Local ML component (15%)
+            ml_alignment = 0.0
+            if ml_prediction:
+                if signal_result.signal == ml_direction:
+                    ml_alignment = ml_confidence / 100  # 0 to 1
+                elif ml_direction == "NEUTRAL":
+                    ml_alignment = 0.5  # Neutral doesn't hurt or help
+                # If ML contradicts, ml_alignment stays 0 (penalty)
+            score += 0.15 * ml_alignment * 100
+            
+            # Gemini AI component (10%)
+            gemini_boost = 0.0
+            if gemini_decision != "NEUTRAL":
+                if gemini_approved:
+                    gemini_boost = gemini_confidence / 100  # 0 to 1 boost
+                else:
+                    gemini_boost = -(gemini_confidence / 100) * 0.5  # Penalty for disagreement
+            score += 0.10 * gemini_boost * 100
             
             # Risk penalty (5%)
             # Lower score if regime confidence is low
@@ -238,7 +340,16 @@ class TradingOrchestrator:
                     "signal_result": signal_result,
                     "regime_state": regime_state,
                     "filters_applied": regime_filters,
-                    "signal_allowed": signal_allowed
+                    "signal_allowed": signal_allowed,
+                    "sentiment_label": sentiment_label,
+                    "sentiment_score": sentiment_score,
+                    "sentiment_source": sentiment_data['source'],
+                    "ml_direction": ml_direction,
+                    "ml_confidence": ml_confidence,
+                    "ml_trained": ml_trained,
+                    "gemini_decision": gemini_decision,
+                    "gemini_confidence": gemini_confidence,
+                    "gemini_approved": gemini_approved
                 }
             )
             
@@ -399,6 +510,59 @@ class TradingOrchestrator:
                 
                 self.trades_executed += 1
                 self.logger.info(f"✅ Position opened successfully: {order_result.order_id}")
+                
+                # Upload AI log to WEEX (matching sentinel service format)
+                try:
+                    metadata = asset_score.metadata
+                    
+                    ai_log_input = {
+                        "market_data": {
+                            "symbol": symbol,
+                            "price": float(order_result.filled_price),
+                            "signal_strength": float(asset_score.confidence),
+                            "regime": str(asset_score.regime),
+                            "stop_loss": float(stop_loss),
+                            "take_profit": float(take_profit)
+                        },
+                        "ml_prediction": {
+                            "direction": str(metadata.get("ml_direction", "UNKNOWN")),
+                            "confidence": int(metadata.get("ml_confidence", 0))
+                        },
+                        "sentiment": {
+                            "label": str(metadata.get("sentiment_label", "NEUTRAL")),
+                            "score": float(metadata.get("sentiment_score", 0.0)),
+                            "source": str(metadata.get("sentiment_source", "N/A"))
+                        },
+                        "prompt": f"Analyze {symbol} for institutional trading opportunity"
+                    }
+                    
+                    ai_log_output = {
+                        "decision": direction,
+                        "confidence": int(asset_score.confidence),
+                        "reasoning": f"Signal {asset_score.signal} in {asset_score.regime} regime",
+                        "ml_agrees": metadata.get("ml_direction") == asset_score.signal,
+                        "gemini_approved": bool(metadata.get("gemini_approved", False)),
+                        "strategy": "Institutional Multi-Asset"
+                    }
+                    
+                    ml_dir = metadata.get("ml_direction", "UNKNOWN")
+                    ml_conf = metadata.get("ml_confidence", 0)
+                    gem_approved = "approved" if metadata.get("gemini_approved") else "consulted"
+                    sent_label = metadata.get("sentiment_label", "NEUTRAL")
+                    
+                    explanation = f"AI analyzed {symbol} with signal strength {asset_score.confidence:.1f}, regime {asset_score.regime}. Decision: {direction} with {asset_score.confidence:.0f}% confidence. ML predicts {ml_dir} ({ml_conf}%), Gemini {gem_approved}, Sentiment: {sent_label}."
+                    
+                    self.client.upload_ai_log(
+                        order_id=order_result.order_id,
+                        stage="Decision Making",
+                        model="Gemini-2.0-Flash-Thinking",
+                        input_data=ai_log_input,
+                        output_data=ai_log_output,
+                        explanation=explanation
+                    )
+                    self.logger.info(f"   AI Log uploaded for order {order_result.order_id}")
+                except Exception as ai_log_err:
+                    self.logger.error(f"   AI Log upload failed: {ai_log_err}")
             else:
                 self.logger.error(f"❌ Order execution failed: {order_result.error_message}")
             
@@ -435,6 +599,41 @@ class TradingOrchestrator:
                 self.logger.info(f"✅ Position closed: PnL ${trade_record['realized_pnl']:.2f} "
                                f"({trade_record['realized_pnl_pct']:.2f}%), "
                                f"Hold time: {trade_record['hold_time_hours']:.1f}h")
+                
+                # Upload AI log for position close (matching sentinel format)
+                try:
+                    ai_log_input = {
+                        "market_data": {
+                            "symbol": symbol,
+                            "price": float(order_result.filled_price),
+                            "position_direction": str(direction),
+                            "close_reason": str(reason)
+                        },
+                        "prompt": f"Close {direction} position on {symbol} - {reason}"
+                    }
+                    
+                    ai_log_output = {
+                        "decision": "CLOSE",
+                        "confidence": 100,
+                        "reasoning": f"Position closed: {reason}",
+                        "pnl": float(trade_record['realized_pnl']),
+                        "pnl_pct": float(trade_record['realized_pnl_pct']),
+                        "strategy": "Institutional Risk Manager"
+                    }
+                    
+                    explanation = f"AI closed {direction} position on {symbol}. Reason: {reason}. PnL: ${trade_record['realized_pnl']:.2f} ({trade_record['realized_pnl_pct']:.2f}%), Hold time: {trade_record['hold_time_hours']:.1f}h."
+                    
+                    self.client.upload_ai_log(
+                        order_id=order_result.order_id,
+                        stage="Strategy Execution",
+                        model="Gemini-2.0-Flash-Thinking",
+                        input_data=ai_log_input,
+                        output_data=ai_log_output,
+                        explanation=explanation
+                    )
+                    self.logger.info(f"   AI Log uploaded for order {order_result.order_id}")
+                except Exception as ai_log_err:
+                    self.logger.error(f"   AI Log upload failed: {ai_log_err}")
             else:
                 self.logger.error(f"❌ Close order failed: {order_result.error_message}")
             

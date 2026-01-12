@@ -22,12 +22,22 @@ def get_sentiment_pipeline():
     global _sentiment_pipeline
     if _sentiment_pipeline is None:
         try:
+            import torch  # Import torch first
             from transformers import pipeline
-            print("Loading FinBERT model...")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("Loading FinBERT model...")
             _sentiment_pipeline = pipeline("sentiment-analysis", model="ProsusAI/finbert")
-            print("FinBERT model loaded")
+            logger.info("FinBERT model loaded successfully")
+        except ImportError as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to load FinBERT dependencies: {e}")
+            _sentiment_pipeline = None
         except Exception as e:
-            print(f"Failed to load FinBERT: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to load FinBERT model: {e}")
             _sentiment_pipeline = None
     return _sentiment_pipeline
 
