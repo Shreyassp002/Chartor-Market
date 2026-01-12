@@ -718,7 +718,7 @@ def get_ai_status():
 @app.get("/api/watchlist")
 def get_watchlist():
     """
-    Fetches LIVE real-time prices + 24h data for the sidebar assets from Binance.
+    Fetches LIVE real-time prices + 24h data for the sidebar assets from WEEX.
     """
     import requests
     
@@ -732,45 +732,51 @@ def get_watchlist():
     watchlist = []
     
     try:
-        # Fetch 24h ticker data from Binance (includes price, change, high, low, volume)
+        # Fetch from WEEX using candle data (most reliable)
         for sym in symbols:
-            binance_symbol = sym.upper().replace("CMT_", "").replace("USDT", "USDT")
-            
             try:
-                # Binance 24h Ticker endpoint
-                response = requests.get(
-                    f"https://api.binance.com/api/v3/ticker/24hr?symbol={binance_symbol}",
-                    timeout=3
-                )
-                ticker = response.json()
-                
-                if "lastPrice" in ticker:
-                    watchlist.append({
-                        "symbol": sym.upper().replace("CMT_", "").replace("USDT", "/USDT"),
-                        "raw_symbol": sym,
-                        "price": float(ticker["lastPrice"]),
-                        "change": round(float(ticker["priceChangePercent"]), 2),
-                        "volume24h": float(ticker["quoteVolume"]),
-                        "high24h": float(ticker["highPrice"]),
-                        "low24h": float(ticker["lowPrice"])
-                    })
-            except:
-                # Fallback: use candle data if ticker fails
-                raw = client.fetch_candles(sym, limit=1)
+                # Get latest 24h candles from WEEX (96 candles for 15m interval = 24 hours)
+                raw = client.fetch_candles(sym, limit=96, interval="15m")
                 if raw and len(raw) > 0:
-                    current_price = float(raw[-1][4])
-                    open_price = float(raw[-1][1])
-                    change_pct = ((current_price - open_price) / open_price) * 100
+                    current_price = float(raw[-1][4])  # Latest close price
+                    open_24h = float(raw[0][1])  # Open price 24h ago
+                    change_pct = ((current_price - open_24h) / open_24h) * 100
+                    
+                    # Calculate 24h high/low from all candles
+                    high_24h = max(float(candle[2]) for candle in raw)
+                    low_24h = min(float(candle[3]) for candle in raw)
+                    volume_24h = sum(float(candle[5]) for candle in raw)
                     
                     watchlist.append({
                         "symbol": sym.upper().replace("CMT_", "").replace("USDT", "/USDT"),
                         "raw_symbol": sym,
                         "price": current_price,
                         "change": round(change_pct, 2),
-                        "volume24h": 0,
-                        "high24h": 0,
-                        "low24h": 0
+                        "volume24h": volume_24h,
+                        "high24h": high_24h,
+                        "low24h": low_24h
                     })
+            except Exception as sym_err:
+                print(f"Error fetching {sym}: {sym_err}")
+                # Fallback: use single candle
+                try:
+                    raw = client.fetch_candles(sym, limit=1)
+                    if raw and len(raw) > 0:
+                        current_price = float(raw[-1][4])
+                        open_price = float(raw[-1][1])
+                        change_pct = ((current_price - open_price) / open_price) * 100
+                        
+                        watchlist.append({
+                            "symbol": sym.upper().replace("CMT_", "").replace("USDT", "/USDT"),
+                            "raw_symbol": sym,
+                            "price": current_price,
+                            "change": round(change_pct, 2),
+                            "volume24h": 0,
+                            "high24h": 0,
+                            "low24h": 0
+                        })
+                except:
+                    pass
         
         return watchlist
     except Exception as e:
