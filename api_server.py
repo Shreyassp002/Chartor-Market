@@ -2388,9 +2388,9 @@ async def run_backtest(background_tasks: BackgroundTasks):
 institutional_thread = None
 institutional_running = False
 
-@app.post("/api/institutional/start")
+@app.post("/api/institutional/start", status_code=200)
 def start_institutional():
-    """Start institutional quant trading system"""
+    """Start institutional quant trading system - No body required"""
     global institutional_thread, institutional_running, active_trading_mode
     
     with trading_mode_lock:
@@ -2424,9 +2424,9 @@ def start_institutional():
             logger.error(f"Failed to start institutional trading: {e}", exc_info=True)
             return {"status": "error", "msg": str(e)}
 
-@app.post("/api/institutional/stop")
+@app.post("/api/institutional/stop", status_code=200)
 def stop_institutional():
-    """Stop institutional quant trading system"""
+    """Stop institutional quant trading system - No body required"""
     global institutional_running, active_trading_mode
     
     with trading_mode_lock:
@@ -2438,8 +2438,8 @@ def stop_institutional():
         logger.info("⏸️ Institutional trading system stopped")
         return {"status": "success", "msg": "Institutional trading stopped"}
 
-@app.get("/api/institutional/status")
-async def get_institutional_status():
+@app.get("/api/institutional/status", status_code=200)
+def get_institutional_status():
     """Get institutional trading system status"""
     return {
         "status": "success",
