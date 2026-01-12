@@ -86,36 +86,32 @@ class ExecutionEngine:
     
     def get_current_price(self, symbol: str) -> float:
         """
-        Get current market price from WEEX orderbook
+        Get current market price from WEEX ticker
         
-        Returns: Mid price (average of best bid and ask)
+        Returns: Last traded price
         """
         try:
-            # Check if client has orderbook method
-            if not hasattr(self.client, 'get_orderbook'):
-                self.logger.warning(f"Cannot get WEEX price - orderbook method not available")
-                return 0.0
+            # Try ticker endpoint first (faster and more reliable)
+            if hasattr(self.client, 'get_ticker'):
+                ticker = self.client.get_ticker(symbol)
+                if ticker and "last" in ticker:
+                    return float(ticker["last"])
             
-            # Get orderbook from WEEX
-            orderbook = self.client.get_orderbook(symbol)
+            # Fallback to orderbook
+            if hasattr(self.client, 'get_orderbook'):
+                orderbook = self.client.get_orderbook(symbol)
+                
+                if orderbook and "bids" in orderbook and "asks" in orderbook:
+                    bids = orderbook["bids"]
+                    asks = orderbook["asks"]
+                    
+                    if bids and asks:
+                        best_bid = float(bids[0][0])
+                        best_ask = float(asks[0][0])
+                        return (best_bid + best_ask) / 2.0
             
-            if not orderbook or "bids" not in orderbook or "asks" not in orderbook:
-                self.logger.warning(f"No orderbook data for {symbol}")
-                return 0.0
-            
-            bids = orderbook["bids"]
-            asks = orderbook["asks"]
-            
-            if not bids or not asks:
-                return 0.0
-            
-            best_bid = float(bids[0][0])
-            best_ask = float(asks[0][0])
-            
-            # Return mid price
-            mid_price = (best_bid + best_ask) / 2.0
-            
-            return mid_price
+            self.logger.warning(f"Cannot get WEEX price for {symbol}")
+            return 0.0
             
         except Exception as e:
             self.logger.error(f"Error getting current price: {e}")

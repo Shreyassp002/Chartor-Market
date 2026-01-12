@@ -470,29 +470,31 @@ class WeexClient:
         logger.info(f"WEEX AI Log Upload Response: {res}")
         return res
     
-    def get_orderbook(self, symbol="cmt_btcusdt", limit=20):
+    def get_ticker(self, symbol="cmt_btcusdt"):
         """
-        Get orderbook depth (bid/ask prices and volumes)
-        Uses /api/mix/v1/market/depth endpoint
+        Get single ticker with current price and 24h stats
+        Uses /capi/v2/market/ticker endpoint (public)
         
         Args:
             symbol: Trading pair (e.g., 'cmt_btcusdt')
-            limit: Depth limit (5, 10, 20, 50, 100)
         
         Returns:
             {
-                "bids": [[price, size], ...],  # Buy orders (highest first)
-                "asks": [[price, size], ...]   # Sell orders (lowest first)
+                "symbol": "cmt_btcusdt",
+                "last": "90755.3",
+                "best_ask": "90755.4",
+                "best_bid": "90755.3",
+                "high_24h": "91130.0",
+                "low_24h": "90097.3",
+                "volume_24h": "2321170547.37995",
+                ...
             }
         """
-        endpoint = "/api/mix/v1/market/depth"
-        params = {
-            "symbol": symbol,
-            "limit": str(limit)
-        }
+        endpoint = "/capi/v2/market/ticker"
+        params = {"symbol": symbol}
         
         try:
-            # This is a public endpoint, so we'll make an unauthenticated request
+            # Public endpoint - no authentication needed
             url = f"{self.base_url}{endpoint}"
             query_string = "&".join([f"{k}={v}" for k, v in params.items()])
             full_url = f"{url}?{query_string}"
@@ -500,14 +502,54 @@ class WeexClient:
             response = requests.get(full_url, timeout=5)
             data = response.json()
             
-            if isinstance(data, dict) and data.get("code") == "00000" and "data" in data:
-                orderbook_data = data["data"]
+            # WEEX returns data directly (no "code" wrapper)
+            if isinstance(data, dict) and "last" in data:
+                return data
+            else:
+                logger.warning(f"Ticker API returned unexpected format: {data}")
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching ticker: {e}")
+            return None
+    
+    def get_orderbook(self, symbol="cmt_btcusdt", limit=15):
+        """
+        Get orderbook depth (bid/ask prices and volumes)
+        Uses /capi/v2/market/depth endpoint (public)
+        
+        Args:
+            symbol: Trading pair (e.g., 'cmt_btcusdt')
+            limit: Depth limit (15 or 200, default 15)
+        
+        Returns:
+            {
+                "bids": [[price, size], ...],  # Buy orders (highest first)
+                "asks": [[price, size], ...]   # Sell orders (lowest first)
+            }
+        """
+        endpoint = "/capi/v2/market/depth"
+        params = {
+            "symbol": symbol,
+            "limit": str(limit)
+        }
+        
+        try:
+            # Public endpoint - no authentication needed
+            url = f"{self.base_url}{endpoint}"
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            full_url = f"{url}?{query_string}"
+            
+            response = requests.get(full_url, timeout=5)
+            data = response.json()
+            
+            # WEEX returns data directly (no "code" wrapper)
+            if isinstance(data, dict) and "bids" in data and "asks" in data:
                 return {
-                    "bids": orderbook_data.get("bids", []),
-                    "asks": orderbook_data.get("asks", [])
+                    "bids": data.get("bids", []),
+                    "asks": data.get("asks", [])
                 }
             else:
-                logger.warning(f"Orderbook API returned: {data}")
+                logger.warning(f"Orderbook API returned unexpected format: {data}")
                 return {"bids": [], "asks": []}
         except Exception as e:
             logger.error(f"Error fetching orderbook: {e}")
